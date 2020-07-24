@@ -185,7 +185,7 @@ namespace RabbitMQ.Client.Impl
                 bytesRead = 1;
                 return string.Empty;
             }
-            if (span.Length >= byteCount + 1)
+            if (byteCount < span.Length)
             {
                 bytesRead = 1 + byteCount;
                 fixed (byte* bytes = &span.Slice(1).GetPinnableReference())
