@@ -33,7 +33,7 @@ namespace RabbitMQ.Client.Impl
 {
     interface IRpcContinuation
     {
-        void HandleCommand(in IncomingCommand cmd);
+        void HandleCommand(MethodBase methodBase);
         void HandleModelShutdown(ShutdownEventArgs reason);
     }
 }

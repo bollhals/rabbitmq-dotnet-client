@@ -37,11 +37,11 @@ namespace RabbitMQ.Client.Impl
 {
     class SimpleBlockingRpcContinuation : IRpcContinuation
     {
-        public readonly BlockingCell<Either<IncomingCommand, ShutdownEventArgs>> m_cell = new BlockingCell<Either<IncomingCommand, ShutdownEventArgs>>();
+        public readonly BlockingCell<Either<MethodBase, ShutdownEventArgs>> m_cell = new BlockingCell<Either<MethodBase, ShutdownEventArgs>>();
 
-        public virtual IncomingCommand GetReply()
+        public virtual MethodBase GetReply()
         {
-            Either<IncomingCommand, ShutdownEventArgs> result = m_cell.WaitForValue();
+            Either<MethodBase, ShutdownEventArgs> result = m_cell.WaitForValue();
             switch (result.Alternative)
             {
                 case EitherAlternative.Left:
@@ -53,9 +53,9 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public virtual IncomingCommand GetReply(TimeSpan timeout)
+        public virtual MethodBase GetReply(TimeSpan timeout)
         {
-            Either<IncomingCommand, ShutdownEventArgs> result = m_cell.WaitForValue(timeout);
+            Either<MethodBase, ShutdownEventArgs> result = m_cell.WaitForValue(timeout);
             switch (result.Alternative)
             {
                 case EitherAlternative.Left:
@@ -67,14 +67,14 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public virtual void HandleCommand(in IncomingCommand cmd)
+        public virtual void HandleCommand(MethodBase methodBase)
         {
-            m_cell.ContinueWithValue(Either<IncomingCommand, ShutdownEventArgs>.Left(cmd));
+            m_cell.ContinueWithValue(Either<MethodBase, ShutdownEventArgs>.Left(methodBase));
         }
 
         public virtual void HandleModelShutdown(ShutdownEventArgs reason)
         {
-            m_cell.ContinueWithValue(Either<IncomingCommand, ShutdownEventArgs>.Right(reason));
+            m_cell.ContinueWithValue(Either<MethodBase, ShutdownEventArgs>.Right(reason));
         }
     }
 }

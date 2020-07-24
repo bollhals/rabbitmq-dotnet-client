@@ -326,7 +326,7 @@ namespace RabbitMQ.Client.Impl
         {
             if (!DispatchAsynchronous(in cmd)) // Was asynchronous. Already processed. No need to process further.
             {
-                _continuationQueue.Next().HandleCommand(in cmd);
+                _continuationQueue.Next().HandleCommand(cmd.Method);
             }
         }
 
@@ -336,7 +336,7 @@ namespace RabbitMQ.Client.Impl
             lock (_rpcLock)
             {
                 TransmitAndEnqueue(new OutgoingCommand(method, header, body), k);
-                return k.GetReply(ContinuationTimeout).Method;
+                return k.GetReply(ContinuationTimeout);
             }
         }
 
@@ -640,7 +640,7 @@ namespace RabbitMQ.Client.Impl
                 _consumers.Remove(consumerTag);
             }
             ConsumerDispatcher.HandleBasicCancelOk(k.m_consumer, consumerTag);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public void HandleBasicConsumeOk(string consumerTag)
@@ -653,7 +653,7 @@ namespace RabbitMQ.Client.Impl
                 _consumers[consumerTag] = k.m_consumer;
             }
             ConsumerDispatcher.HandleBasicConsumeOk(k.m_consumer, consumerTag);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public virtual void HandleBasicDeliver(string consumerTag,
@@ -697,7 +697,7 @@ namespace RabbitMQ.Client.Impl
         {
             var k = (BasicGetRpcContinuation)_continuationQueue.Next();
             k.m_result = null;
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public virtual void HandleBasicGetOk(ulong deliveryTag,
@@ -711,14 +711,14 @@ namespace RabbitMQ.Client.Impl
         {
             var k = (BasicGetRpcContinuation)_continuationQueue.Next();
             k.m_result = new BasicGetResult(deliveryTag, redelivered, exchange, routingKey, messageCount, basicProperties, body, rentedArray);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public void HandleBasicRecoverOk()
         {
             var k = (SimpleBlockingRpcContinuation)_continuationQueue.Next();
             OnBasicRecoverOk(EventArgs.Empty);
-            k.HandleCommand(IncomingCommand.Empty);
+            k.HandleCommand(null);
         }
 
         public void HandleBasicReturn(ushort replyCode,
@@ -839,7 +839,7 @@ namespace RabbitMQ.Client.Impl
             k.m_redirect = false;
             k.m_host = null;
             k.m_knownHosts = knownHosts;
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public void HandleConnectionSecure(byte[] challenge)
@@ -849,7 +849,7 @@ namespace RabbitMQ.Client.Impl
             {
                 m_challenge = challenge
             };
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public void HandleConnectionStart(byte versionMajor,
@@ -892,7 +892,7 @@ namespace RabbitMQ.Client.Impl
                     m_heartbeatInSeconds = heartbeatInSeconds
                 }
             };
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public void HandleConnectionUnblocked()
@@ -908,7 +908,7 @@ namespace RabbitMQ.Client.Impl
         {
             var k = (QueueDeclareRpcContinuation)_continuationQueue.Next();
             k.m_result = new QueueDeclareOk(queue, messageCount, consumerCount);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            k.HandleCommand(null); // release the continuation.
         }
 
         public abstract void _Private_BasicCancel(string consumerTag,
