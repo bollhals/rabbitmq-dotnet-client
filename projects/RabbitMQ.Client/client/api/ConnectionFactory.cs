@@ -505,28 +505,11 @@ namespace RabbitMQ.Client
 
         internal IFrameHandler CreateFrameHandler(AmqpTcpEndpoint endpoint)
         {
-            IFrameHandler fh = Protocols.DefaultProtocol.CreateFrameHandler(endpoint, SocketFactory,
-                RequestedConnectionTimeout, SocketReadTimeout, SocketWriteTimeout);
-            return ConfigureFrameHandler(fh);
-        }
-
-        private IFrameHandler ConfigureFrameHandler(IFrameHandler fh)
-        {
-            // TODO: add user-provided configurator, like in the Java client
-            fh.ReadTimeout = RequestedHeartbeat;
-            fh.WriteTimeout = RequestedHeartbeat;
-
-            if (SocketReadTimeout > RequestedHeartbeat)
-            {
-                fh.ReadTimeout = SocketReadTimeout;
-            }
-
-            if (SocketWriteTimeout > RequestedHeartbeat)
-            {
-                fh.WriteTimeout = SocketWriteTimeout;
-            }
-
-            return fh;
+            TimeSpan readTimeout = SocketReadTimeout > RequestedHeartbeat ? SocketReadTimeout : RequestedHeartbeat;
+            TimeSpan writeTimeout = SocketWriteTimeout > RequestedHeartbeat ? SocketWriteTimeout : RequestedHeartbeat;
+            //TODO: push async further
+            ITcpClient client = TcpClientFactory.CreateAsync(endpoint, RequestedConnectionTimeout, readTimeout, writeTimeout).GetAwaiter().GetResult();
+            return new SocketFrameHandler(client);
         }
 
         private void SetUri(Uri uri)

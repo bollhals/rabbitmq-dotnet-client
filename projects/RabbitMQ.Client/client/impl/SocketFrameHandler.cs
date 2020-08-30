@@ -33,56 +33,25 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Net;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-using RabbitMQ.Client.Exceptions;
-
 namespace RabbitMQ.Client.Impl
 {
-    internal static class TaskExtensions
+    internal sealed class SocketFrameHandler : IFrameHandler
     {
-        public static async Task TimeoutAfter(this Task task, TimeSpan timeout)
-        {
-            if (task == await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false))
-            {
-                await task.ConfigureAwait(false);
-            }
-            else
-            {
-                Task supressErrorTask = task.ContinueWith((t, s) => t.Exception.Handle(e => true), null, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                throw new TimeoutException();
-            }
-        }
-    }
-
-    internal class SocketFrameHandler : IFrameHandler
-    {
-        // Socket poll timeout in ms. If the socket does not
-        // become writeable in this amount of time, we throw
-        // an exception.
-        private TimeSpan _writeableStateTimeout = TimeSpan.FromSeconds(30);
-        private int _writeableStateTimeoutMicroSeconds;
-        private readonly ITcpClient _socket;
-        private readonly Stream _reader;
-        private readonly Stream _writer;
-        private readonly ChannelWriter<ReadOnlyMemory<byte>> _channelWriter;
-        private readonly ChannelReader<ReadOnlyMemory<byte>> _channelReader;
+        private const int BufferSize = 65536;
+        private readonly ITcpClient _tcpClient;
+        private readonly Stream _outgoingStream;
+        private readonly ChannelWriter<ReadOnlyMemory<byte>> _intermediateBufferWriter;
+        private readonly ChannelReader<ReadOnlyMemory<byte>> _intermediateBufferReader;
         private readonly Task _writerTask;
-        private readonly object _semaphore = new object();
-        private readonly byte[] _frameHeaderBuffer;
-        private bool _closed;
 
-        public SocketFrameHandler(AmqpTcpEndpoint endpoint,
-            Func<AddressFamily, ITcpClient> socketFactory,
-            TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)
+        public SocketFrameHandler(ITcpClient tcpClient)
         {
-            Endpoint = endpoint;
-            _frameHeaderBuffer = new byte[6];
+            _tcpClient = tcpClient;
             var channel = Channel.CreateUnbounded<ReadOnlyMemory<byte>>(
                 new UnboundedChannelOptions
                 {
@@ -91,258 +60,66 @@ namespace RabbitMQ.Client.Impl
                     SingleWriter = false
                 });
 
-            _channelReader = channel.Reader;
-            _channelWriter = channel.Writer;
+            _intermediateBufferReader = channel.Reader;
+            _intermediateBufferWriter = channel.Writer;
 
-            // Resolve the hostname to know if it's even possible to even try IPv6
-            IPAddress[] adds = Dns.GetHostAddresses(endpoint.HostName);
-            IPAddress ipv6 = TcpClientAdapterHelper.GetMatchingHost(adds, AddressFamily.InterNetworkV6);
+            Stream stream = tcpClient.GetStream();
+            IncomingStream = new BufferedStream(stream, BufferSize);
+            _outgoingStream = new BufferedStream(stream, BufferSize);
 
-            if (ipv6 == default(IPAddress))
-            {
-                if (endpoint.AddressFamily == AddressFamily.InterNetworkV6)
-                {
-                    throw new ConnectFailureException("Connection failed", new ArgumentException($"No IPv6 address could be resolved for {endpoint.HostName}"));
-                }
-            }
-            else if (ShouldTryIPv6(endpoint))
-            {
-                try
-                {
-                    _socket = ConnectUsingIPv6(new IPEndPoint(ipv6, endpoint.Port), socketFactory, connectionTimeout);
-                }
-                catch (ConnectFailureException)
-                {
-                    // We resolved to a ipv6 address and tried it but it still didn't connect, try IPv4
-                    _socket = null;
-                }
-            }
+            _writerTask = Task.Run(WriteLoop, CancellationToken.None);
+        }
 
-            if (_socket is null)
-            {
-                IPAddress ipv4 = TcpClientAdapterHelper.GetMatchingHost(adds, AddressFamily.InterNetwork);
-                if (ipv4 == default(IPAddress))
-                {
-                    throw new ConnectFailureException("Connection failed", new ArgumentException($"No ip address could be resolved for {endpoint.HostName}"));
-                }
-                _socket = ConnectUsingIPv4(new IPEndPoint(ipv4, endpoint.Port), socketFactory, connectionTimeout);
-            }
+        public Stream IncomingStream { get; }
 
-            Stream netstream = _socket.GetStream();
-            netstream.ReadTimeout = (int)readTimeout.TotalMilliseconds;
-            netstream.WriteTimeout = (int)writeTimeout.TotalMilliseconds;
+        public AmqpTcpEndpoint Endpoint => _tcpClient.Endpoint;
+        public IPEndPoint LocalEndPoint => _tcpClient.LocalEndPoint;
+        public IPEndPoint RemoteEndPoint => _tcpClient.RemoteEndPoint;
+        public TimeSpan ReadTimeout { set => _tcpClient.ReadTimeout = value; }
+        public TimeSpan WriteTimeout { set => _tcpClient.WriteTimeout = value; }
 
-            if (endpoint.Ssl.Enabled)
+        public async Task CloseAsync()
+        {
+            if (_intermediateBufferWriter.TryComplete())
             {
                 try
                 {
-                    netstream = SslHelper.TcpUpgrade(netstream, endpoint.Ssl);
+                    await _writerTask.ConfigureAwait(false);
+                }
+                catch(Exception)
+                {
+                    // ignore, we are closing anyway
+                }
+
+                try
+                {
+                    _tcpClient.Dispose();
                 }
                 catch (Exception)
                 {
-                    Close();
-                    throw;
+                    // ignore, we are closing anyway
                 }
             }
-
-            _reader = new BufferedStream(netstream, _socket.Client.ReceiveBufferSize);
-            _writer = new BufferedStream(netstream, _socket.Client.SendBufferSize);
-
-            WriteTimeout = writeTimeout;
-            _writerTask = Task.Run(WriteLoop, CancellationToken.None);
-        }
-        public AmqpTcpEndpoint Endpoint { get; set; }
-
-        public EndPoint LocalEndPoint
-        {
-            get { return _socket.Client.LocalEndPoint; }
-        }
-
-        public int LocalPort
-        {
-            get { return ((IPEndPoint)LocalEndPoint).Port; }
-        }
-
-        public EndPoint RemoteEndPoint
-        {
-            get { return _socket.Client.RemoteEndPoint; }
-        }
-
-        public int RemotePort
-        {
-            get { return ((IPEndPoint)LocalEndPoint).Port; }
-        }
-
-        public TimeSpan ReadTimeout
-        {
-            set
-            {
-                try
-                {
-                    if (_socket.Connected)
-                    {
-                        _socket.ReceiveTimeout = value;
-                    }
-                }
-                catch (SocketException)
-                {
-                    // means that the socket is already closed
-                }
-            }
-        }
-
-        public TimeSpan WriteTimeout
-        {
-            set
-            {
-                _writeableStateTimeout = value;
-                _socket.Client.SendTimeout = (int)_writeableStateTimeout.TotalMilliseconds;
-                _writeableStateTimeoutMicroSeconds = _socket.Client.SendTimeout * 1000;
-            }
-        }
-
-        public void Close()
-        {
-            lock (_semaphore)
-            {
-                if (!_closed)
-                {
-                    try
-                    {
-                        _channelWriter.Complete();
-                        _writerTask.GetAwaiter().GetResult();
-                    }
-                    catch(Exception)
-                    {
-                    }
-
-                    try
-                    {
-                        _socket.Close();
-                    }
-                    catch (Exception)
-                    {
-                        // ignore, we are closing anyway
-                    }
-                    finally
-                    {
-                        _closed = true;
-                    }
-                }
-            }
-        }
-
-        public InboundFrame ReadFrame()
-        {
-            return InboundFrame.ReadFrom(_reader, _frameHeaderBuffer);
-        }
-
-        public void SendHeader()
-        {
-            byte[] headerBytes = new byte[8];
-            Encoding.ASCII.GetBytes("AMQP", 0, 4, headerBytes, 0);
-            if (Endpoint.Protocol.Revision != 0)
-            {
-                headerBytes[4] = 0;
-                headerBytes[5] = (byte)Endpoint.Protocol.MajorVersion;
-                headerBytes[6] = (byte)Endpoint.Protocol.MinorVersion;
-                headerBytes[7] = (byte)Endpoint.Protocol.Revision;
-            }
-            else
-            {
-                headerBytes[4] = 1;
-                headerBytes[5] = 1;
-                headerBytes[6] = (byte)Endpoint.Protocol.MajorVersion;
-                headerBytes[7] = (byte)Endpoint.Protocol.MinorVersion;
-            }
-
-            _writer.Write(headerBytes, 0, 8);
-            _writer.Flush();
         }
 
         public void Write(ReadOnlyMemory<byte> memory)
         {
-            _channelWriter.TryWrite(memory);
+            _intermediateBufferWriter.TryWrite(memory);
         }
 
         private async Task WriteLoop()
         {
-            while (await _channelReader.WaitToReadAsync().ConfigureAwait(false))
+            while (await _intermediateBufferReader.WaitToReadAsync().ConfigureAwait(false))
             {
-                _socket.Client.Poll(_writeableStateTimeoutMicroSeconds, SelectMode.SelectWrite);
-                while (_channelReader.TryRead(out ReadOnlyMemory<byte> memory))
+                _tcpClient.WaitUntilSenderIsReady();
+                while (_intermediateBufferReader.TryRead(out ReadOnlyMemory<byte> memory))
                 {
                     MemoryMarshal.TryGetArray(memory, out ArraySegment<byte> segment);
-                    await _writer.WriteAsync(segment.Array, segment.Offset, segment.Count).ConfigureAwait(false);
+                    await _outgoingStream.WriteAsync(segment.Array, segment.Offset, segment.Count).ConfigureAwait(false);
                     ArrayPool<byte>.Shared.Return(segment.Array);
                 }
 
-                await _writer.FlushAsync().ConfigureAwait(false);
-            }
-        }
-
-        private static bool ShouldTryIPv6(AmqpTcpEndpoint endpoint)
-        {
-            return Socket.OSSupportsIPv6 && endpoint.AddressFamily != AddressFamily.InterNetwork;
-        }
-
-        private ITcpClient ConnectUsingIPv6(IPEndPoint endpoint,
-                                            Func<AddressFamily, ITcpClient> socketFactory,
-                                            TimeSpan timeout)
-        {
-            return ConnectUsingAddressFamily(endpoint, socketFactory, timeout, AddressFamily.InterNetworkV6);
-        }
-
-        private ITcpClient ConnectUsingIPv4(IPEndPoint endpoint,
-                                            Func<AddressFamily, ITcpClient> socketFactory,
-                                            TimeSpan timeout)
-        {
-            return ConnectUsingAddressFamily(endpoint, socketFactory, timeout, AddressFamily.InterNetwork);
-        }
-
-        private ITcpClient ConnectUsingAddressFamily(IPEndPoint endpoint,
-                                                    Func<AddressFamily, ITcpClient> socketFactory,
-                                                    TimeSpan timeout, AddressFamily family)
-        {
-            ITcpClient socket = socketFactory(family);
-            try
-            {
-                ConnectOrFail(socket, endpoint, timeout);
-                return socket;
-            }
-            catch (ConnectFailureException)
-            {
-                socket.Dispose();
-                throw;
-            }
-        }
-
-        private void ConnectOrFail(ITcpClient socket, IPEndPoint endpoint, TimeSpan timeout)
-        {
-            try
-            {
-                socket.ConnectAsync(endpoint.Address, endpoint.Port)
-                     .TimeoutAfter(timeout)
-                     .ConfigureAwait(false)
-                     // this ensures exceptions aren't wrapped in an AggregateException
-                     .GetAwaiter()
-                     .GetResult();
-            }
-            catch (ArgumentException e)
-            {
-                throw new ConnectFailureException("Connection failed", e);
-            }
-            catch (SocketException e)
-            {
-                throw new ConnectFailureException("Connection failed", e);
-            }
-            catch (NotSupportedException e)
-            {
-                throw new ConnectFailureException("Connection failed", e);
-            }
-            catch (TimeoutException e)
-            {
-                throw new ConnectFailureException("Connection failed", e);
+                await _outgoingStream.FlushAsync().ConfigureAwait(false);
             }
         }
     }

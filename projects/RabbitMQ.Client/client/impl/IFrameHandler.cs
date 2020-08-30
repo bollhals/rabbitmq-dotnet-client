@@ -30,21 +30,20 @@
 //---------------------------------------------------------------------------
 
 using System;
+using System.Buffers;
+using System.IO;
 using System.Net;
+using System.Threading.Tasks;
 
 namespace RabbitMQ.Client.Impl
 {
     internal interface IFrameHandler
     {
+        Stream IncomingStream { get; }
+
         AmqpTcpEndpoint Endpoint { get; }
-
-        EndPoint LocalEndPoint { get; }
-
-        int LocalPort { get; }
-
-        EndPoint RemoteEndPoint { get; }
-
-        int RemotePort { get; }
+        IPEndPoint LocalEndPoint { get; }
+        IPEndPoint RemoteEndPoint { get; }
 
         ///<summary>Socket read timeout. System.Threading.Timeout.InfiniteTimeSpan signals "infinity".</summary>
         TimeSpan ReadTimeout { set; }
@@ -52,15 +51,13 @@ namespace RabbitMQ.Client.Impl
         ///<summary>Socket write timeout. System.Threading.Timeout.InfiniteTimeSpan signals "infinity".</summary>
         TimeSpan WriteTimeout { set; }
 
-        void Close();
-
-        ///<summary>Read a frame from the underlying
-        ///transport. Returns null if the read operation timed out
-        ///(see Timeout property).</summary>
-        InboundFrame ReadFrame();
-
-        void SendHeader();
-
+        /// <summary>
+        /// Writes the memory to the endpoint.
+        /// </summary>
+        /// <param name="memory">The memory to write.</param>
+        /// <remarks>The memory will be returned to the <see cref="ArrayPool{T}"/> after it has been written.</remarks>
         void Write(ReadOnlyMemory<byte> memory);
+
+        Task CloseAsync();
     }
 }

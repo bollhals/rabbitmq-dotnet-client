@@ -211,17 +211,12 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public AmqpTcpEndpoint[] KnownHosts { get; set; }
 
-        public EndPoint LocalEndPoint => _frameHandler.LocalEndPoint;
-
-        public int LocalPort => _frameHandler.LocalPort;
+        public int LocalPort => _frameHandler.LocalEndPoint.Port;
+        public int RemotePort => _frameHandler.RemoteEndPoint.Port;
 
         ///<summary>Another overload of a Protocol property, useful
         ///for exposing a tighter type.</summary>
         public ProtocolBase Protocol => (ProtocolBase)Endpoint.Protocol;
-
-        public EndPoint RemoteEndPoint => _frameHandler.RemoteEndPoint;
-
-        public int RemotePort => _frameHandler.RemotePort;
 
         public IDictionary<string, object> ServerProperties { get; set; }
 
@@ -325,7 +320,7 @@ namespace RabbitMQ.Client.Framing.Impl
             bool receivedSignal = _appContinuation.Wait(timeout);
             if (!receivedSignal)
             {
-                _frameHandler.Close();
+                _frameHandler.CloseAsync().GetAwaiter().GetResult();
             }
         }
 
@@ -397,18 +392,9 @@ namespace RabbitMQ.Client.Framing.Impl
             _closed = true;
             MaybeStopHeartbeatTimers();
 
-            _frameHandler.Close();
+            _frameHandler.CloseAsync().GetAwaiter().GetResult();
             _model0.SetCloseReason(_closeReason);
             _model0.FinishClose();
-        }
-
-        /// <remarks>
-        /// We need to close the socket, otherwise attempting to unload the domain
-        /// could cause a CannotUnloadAppDomainException
-        /// </remarks>
-        public void HandleDomainUnload(object sender, EventArgs ea)
-        {
-            Abort(Constants.InternalError, "Domain Unload");
         }
 
         public void HandleMainLoopException(ShutdownEventArgs reason)
@@ -472,24 +458,14 @@ namespace RabbitMQ.Client.Framing.Impl
             ShutdownReport.Add(new ShutdownReportEntry(error, ex));
         }
 
-        public void MainLoop()
+        private void MainLoop()
         {
             try
             {
                 bool shutdownCleanly = false;
                 try
                 {
-                    while (_running)
-                    {
-                        try
-                        {
-                            MainLoopIteration();
-                        }
-                        catch (SoftProtocolException spe)
-                        {
-                            QuiesceChannel(spe);
-                        }
-                    }
+                    MainLoopIteration();
                     shutdownCleanly = true;
                 }
                 catch (EndOfStreamException eose)
@@ -539,51 +515,64 @@ namespace RabbitMQ.Client.Framing.Impl
             }
         }
 
-        public void MainLoopIteration()
+        private void MainLoopIteration()
         {
-            InboundFrame frame = _frameHandler.ReadFrame();
-            NotifyHeartbeatListener();
-
-            bool shallReturn = true;
-            // We have received an actual frame.
-            if (frame.Type == FrameType.FrameHeartbeat)
+            InboundFrame frame;
+            Stream incomingStream = _frameHandler.IncomingStream;
+            byte[] frameHeaderBuffer = new byte[6];
+            while (_running)
             {
-                // Ignore it: we've already just reset the heartbeat
-            }
-            else if (frame.Channel == 0)
-            {
-                // In theory, we could get non-connection.close-ok
-                // frames here while we're quiescing (m_closeReason !=
-                // null). In practice, there's a limited number of
-                // things the server can ask of us on channel 0 -
-                // essentially, just connection.close. That, combined
-                // with the restrictions on pipelining, mean that
-                // we're OK here to handle channel 0 traffic in a
-                // quiescing situation, even though technically we
-                // should be ignoring everything except
-                // connection.close-ok.
-                shallReturn = _session0.HandleFrame(in frame);
-            }
-            else
-            {
-                // If we're still m_running, but have a m_closeReason,
-                // then we must be quiescing, which means any inbound
-                // frames for non-zero channels (and any inbound
-                // commands on channel zero that aren't
-                // Connection.CloseOk) must be discarded.
-                if (_closeReason is null)
+                try
                 {
-                    // No close reason, not quiescing the
-                    // connection. Handle the frame. (Of course, the
-                    // Session itself may be quiescing this particular
-                    // channel, but that's none of our concern.)
-                    shallReturn = _sessionManager.Lookup(frame.Channel).HandleFrame(in frame);
-                }
-            }
+                    frame = InboundFrame.ReadFrom(incomingStream, frameHeaderBuffer);
+                    NotifyHeartbeatListener();
 
-            if (shallReturn)
-            {
-                frame.ReturnPayload();
+                    bool shallReturn = true;
+                    // We have received an actual frame.
+                    if (frame.Type == FrameType.FrameHeartbeat)
+                    {
+                        // Ignore it: we've already just reset the heartbeat
+                    }
+                    else if (frame.Channel == 0)
+                    {
+                        // In theory, we could get non-connection.close-ok
+                        // frames here while we're quiescing (m_closeReason !=
+                        // null). In practice, there's a limited number of
+                        // things the server can ask of us on channel 0 -
+                        // essentially, just connection.close. That, combined
+                        // with the restrictions on pipelining, mean that
+                        // we're OK here to handle channel 0 traffic in a
+                        // quiescing situation, even though technically we
+                        // should be ignoring everything except
+                        // connection.close-ok.
+                        shallReturn = _session0.HandleFrame(in frame);
+                    }
+                    else
+                    {
+                        // If we're still m_running, but have a m_closeReason,
+                        // then we must be quiescing, which means any inbound
+                        // frames for non-zero channels (and any inbound
+                        // commands on channel zero that aren't
+                        // Connection.CloseOk) must be discarded.
+                        if (_closeReason is null)
+                        {
+                            // No close reason, not quiescing the
+                            // connection. Handle the frame. (Of course, the
+                            // Session itself may be quiescing this particular
+                            // channel, but that's none of our concern.)
+                            shallReturn = _sessionManager.Lookup(frame.Channel).HandleFrame(in frame);
+                        }
+                    }
+
+                    if (shallReturn)
+                    {
+                        frame.ReturnPayload();
+                    }
+                }
+                catch (SoftProtocolException spe)
+                {
+                    QuiesceChannel(spe);
+                }
             }
         }
 
@@ -684,24 +673,6 @@ namespace RabbitMQ.Client.Framing.Impl
             _model0.ConnectionOpen(_factory.VirtualHost, string.Empty, false);
         }
 
-        public void PrettyPrintShutdownReport()
-        {
-            if (ShutdownReport.Count == 0)
-            {
-                Console.Error.WriteLine(
-"No errors reported when closing connection {0}", this);
-            }
-            else
-            {
-                Console.Error.WriteLine(
-"Log of errors while closing connection {0}:", this);
-                for (int index = 0; index < ShutdownReport.Count; index++)
-                {
-                    Console.Error.WriteLine(ShutdownReport[index].ToString());
-                }
-            }
-        }
-
         ///<summary>
         /// Sets the channel named in the SoftProtocolException into
         /// "quiescing mode", where we issue a channel.close and
@@ -796,7 +767,7 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public void StartMainLoop()
         {
-            _mainLoopTask = Task.Run((Action)MainLoop);
+            _mainLoopTask = Task.Run(MainLoop);
         }
 
         public void HeartbeatReadTimerCallback(object state)
@@ -1033,7 +1004,7 @@ namespace RabbitMQ.Client.Framing.Impl
             _model0.m_connectionStartCell = connectionStartCell;
             _model0.HandshakeContinuationTimeout = _factory.HandshakeContinuationTimeout;
             _frameHandler.ReadTimeout = _factory.HandshakeContinuationTimeout;
-            _frameHandler.SendHeader();
+            SendHeader();
 
             ConnectionStartDetails connectionStart = connectionStartCell.WaitForValue();
 
@@ -1127,6 +1098,32 @@ namespace RabbitMQ.Client.Framing.Impl
 
             // now we can start heartbeat timers
             MaybeStartHeartbeatTimers();
+        }
+
+        private void SendHeader()
+        {
+            byte[] headerBytes = ArrayPool<byte>.Shared.Rent(8);
+            headerBytes[0] = (byte)'A';
+            headerBytes[1] = (byte)'M';
+            headerBytes[2] = (byte)'Q';
+            headerBytes[3] = (byte)'P';
+
+            if (Endpoint.Protocol.Revision != 0)
+            {
+                headerBytes[4] = 0;
+                headerBytes[5] = (byte)Endpoint.Protocol.MajorVersion;
+                headerBytes[6] = (byte)Endpoint.Protocol.MinorVersion;
+                headerBytes[7] = (byte)Endpoint.Protocol.Revision;
+            }
+            else
+            {
+                headerBytes[4] = 1;
+                headerBytes[5] = 1;
+                headerBytes[6] = (byte)Endpoint.Protocol.MajorVersion;
+                headerBytes[7] = (byte)Endpoint.Protocol.MinorVersion;
+            }
+
+            _frameHandler.Write(new ReadOnlyMemory<byte>(headerBytes, 0, 8));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

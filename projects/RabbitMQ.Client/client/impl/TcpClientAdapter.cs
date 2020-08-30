@@ -1,114 +1,62 @@
 ﻿using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading.Tasks;
 
 namespace RabbitMQ.Client.Impl
 {
     /// <summary>
     /// Simple wrapper around TcpClient.
     /// </summary>
-    internal class TcpClientAdapter : ITcpClient
+    internal sealed class TcpClientAdapter : ITcpClient
     {
-        private Socket _sock;
+        private const int MsInUs = 1000;
+        private readonly TcpClient _client;
+        private readonly Stream _stream;
+        private int _pollTimeout;
 
-        public TcpClientAdapter(Socket socket)
+        public TcpClientAdapter(TcpClient client, Stream stream, AmqpTcpEndpoint endpoint)
         {
-            _sock = socket ?? throw new InvalidOperationException("socket must not be null");
+            _client = client;
+            _stream = stream;
+            Endpoint = endpoint;
+            _pollTimeout = _client.SendTimeout * MsInUs;
         }
 
-        public virtual async Task ConnectAsync(string host, int port)
-        {
-            AssertSocket();
-            IPAddress[] adds = await Dns.GetHostAddressesAsync(host).ConfigureAwait(false);
-            IPAddress ep = TcpClientAdapterHelper.GetMatchingHost(adds, _sock.AddressFamily);
-            if (ep == default(IPAddress))
-            {
-                throw new ArgumentException($"No ip address could be resolved for {host}");
-            }
+        public AmqpTcpEndpoint Endpoint { get; }
+        public IPEndPoint LocalEndPoint => (IPEndPoint)_client.Client.LocalEndPoint;
+        public IPEndPoint RemoteEndPoint => (IPEndPoint)_client.Client.RemoteEndPoint;
 
-            await ConnectAsync(ep, port).ConfigureAwait(false);
+        public TimeSpan ReadTimeout
+        {
+            get => TimeSpan.FromMilliseconds(_client.ReceiveTimeout);
+            set => _client.ReceiveTimeout = (int)value.TotalMilliseconds;
         }
 
-        public virtual async Task ConnectAsync(IPAddress ep, int port)
+        public TimeSpan WriteTimeout
         {
-            AssertSocket();
-#if NET461
-            await Task.Run(() => _sock.Connect(ep, port)).ConfigureAwait(false);
-#else
-            await _sock.ConnectAsync(ep, port).ConfigureAwait(false);
-#endif
-        }
-
-        public virtual void Close()
-        {
-            _sock?.Dispose();
-            _sock = null;
-        }
-
-        [Obsolete("Override Dispose(bool) instead.")]
-        public virtual void Dispose()
-        {
-            Dispose(true);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                // dispose managed resources
-                Close();
-            }
-
-            // dispose unmanaged resources
-        }
-
-        public virtual NetworkStream GetStream()
-        {
-            AssertSocket();
-            return new NetworkStream(_sock);
-        }
-
-        public virtual Socket Client
-        {
-            get
-            {
-                return _sock;
-            }
-        }
-
-        public virtual bool Connected
-        {
-            get
-            {
-                if (_sock is null)
-                {
-                    return false;
-                }
-                return _sock.Connected;
-            }
-        }
-
-        public virtual TimeSpan ReceiveTimeout
-        {
-            get
-            {
-                AssertSocket();
-                return TimeSpan.FromMilliseconds(_sock.ReceiveTimeout);
-            }
+            get => TimeSpan.FromMilliseconds(_client.SendTimeout);
             set
             {
-                AssertSocket();
-                _sock.ReceiveTimeout = (int)value.TotalMilliseconds;
+                int timeout = (int)value.TotalMilliseconds;
+                _client.SendTimeout = timeout;
+                _pollTimeout = timeout * MsInUs;
             }
         }
 
-        private void AssertSocket()
+        public Stream GetStream()
         {
-            if (_sock is null)
-            {
-                throw new InvalidOperationException("Cannot perform operation as socket is null");
-            }
+            return _stream;
+        }
+
+        public void WaitUntilSenderIsReady()
+        {
+            _client.Client.Poll(_pollTimeout, SelectMode.SelectWrite);
+        }
+
+        public void Dispose()
+        {
+            _client.Dispose();
         }
     }
 }

@@ -1,27 +1,22 @@
 ﻿using System;
+using System.IO;
 using System.Net;
-using System.Net.Sockets;
-using System.Threading.Tasks;
 
 namespace RabbitMQ.Client
 {
     /// <summary>
-    /// Wrapper interface for standard TCP-client. Provides socket for socket frame handler class.
+    /// Wrapper interface for a specific endpoint client.
     /// </summary>
-    /// <remarks>Contains all methods that are currenty in use in rabbitmq client.</remarks>
     public interface ITcpClient : IDisposable
     {
-        bool Connected { get; }
+        AmqpTcpEndpoint Endpoint { get; }
+        IPEndPoint LocalEndPoint { get; }
+        IPEndPoint RemoteEndPoint { get; }
 
-        TimeSpan ReceiveTimeout { get; set; }
+        TimeSpan ReadTimeout { get; set; }
+        TimeSpan WriteTimeout { get; set; }
 
-        Socket Client { get; }
-
-        Task ConnectAsync(string host, int port);
-        Task ConnectAsync(IPAddress host, int port);
-
-        NetworkStream GetStream();
-
-        void Close();
+        Stream GetStream();
+        void WaitUntilSenderIsReady();
     }
 }
