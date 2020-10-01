@@ -5,6 +5,7 @@
     <AssemblyOriginatorKeyFile>../rabbit.snk</AssemblyOriginatorKeyFile>
     <SignAssembly>true</SignAssembly>
     <TargetFramework>netcoreapp3.1</TargetFramework>
+    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RabbitMQ.Client\RabbitMQ.Client.csproj" />
+    <ProjectReference Include="..\Unit\Unit.csproj" />
   </ItemGroup>
 
 </Project>
