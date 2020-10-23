@@ -32,7 +32,6 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-
 using RabbitMQ.Client.Exceptions;
 using RabbitMQ.Client.Framing.Impl;
 
@@ -125,24 +124,37 @@ namespace RabbitMQ.Client.Impl
             OnSessionShutdown(reason);
         }
 
-        public virtual void Transmit<T>(in T cmd) where T : struct, IOutgoingCommand
+        public virtual void Transmit<T>(in T cmd) where T : struct, IOutgoingAmqpMethod
         {
-            if (!IsOpen && cmd.Method.ProtocolCommandId != client.framing.ProtocolCommandId.ChannelCloseOk)
+            if (!IsOpen && cmd.ProtocolCommandId != client.framing.ProtocolCommandId.ChannelCloseOk)
             {
-                throw new AlreadyClosedException(CloseReason);
+                ThrowAlreadyClosedException();
             }
 
-            // We used to transmit *inside* the lock to avoid interleaving
-            // of frames within a channel.  But that is fixed in socket frame handler instead, so no need to lock.
-            Connection.Write(cmd.SerializeToFrames(ChannelNumber, Connection.FrameMax));
+            Connection.Write(Framing.SerializeToFrames(cmd, ChannelNumber));
         }
 
-        public virtual void Transmit<T>(List<T> cmds) where T : struct, IOutgoingCommand
+        public void Transmit<T>(in T cmd, ContentHeaderBase header, ReadOnlyMemory<byte> body) where T : struct, IOutgoingAmqpMethod
         {
-            uint frameMax = Connection.FrameMax;
-            for (int i = 0; i < cmds.Count; i++)
+            if (!IsOpen && cmd.ProtocolCommandId != client.framing.ProtocolCommandId.ChannelCloseOk)
             {
-                Connection.Write(cmds[i].SerializeToFrames(ChannelNumber, frameMax));
+                ThrowAlreadyClosedException();
+            }
+
+            Connection.Write(Framing.SerializeToFrames(cmd, header, body, ChannelNumber, Connection.MaxPayloadSize));
+        }
+
+        private void ThrowAlreadyClosedException()
+            => throw new AlreadyClosedException(CloseReason);
+
+        public void Transmit<T>(List<CommandParts<T>> cmds) where T : struct, IOutgoingAmqpMethod
+        {
+            int maxPayloadSize = Connection.MaxPayloadSize;
+            ushort channelNumber = ChannelNumber;
+
+            foreach (var parts in cmds)
+            {
+                Connection.Write(Framing.SerializeToFrames(parts.Method, parts.Header, parts.Body, channelNumber, maxPayloadSize));
             }
         }
     }

@@ -38,7 +38,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
+using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
 using RabbitMQ.Client.Impl;
@@ -192,6 +192,13 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public uint FrameMax { get; private set; }
 
+        /// <summary>
+        /// The maximum payload size for this connection.
+        /// </summary>
+        /// <remarks>Compared to <see cref="FrameMax"/> unlimited, unlimited means here <see cref="int.MaxValue"/>.
+        /// Also it is reduced by the required framing bytes as in <see cref="RabbitMQ.Client.Impl.Framing.BaseFrameSize"/>.</remarks>
+        internal int MaxPayloadSize { get; private set; }
+
         public TimeSpan Heartbeat
         {
             get => _heartbeat;
@@ -269,7 +276,7 @@ namespace RabbitMQ.Client.Framing.Impl
                 {
                     // Try to send connection.close
                     // Wait for CloseOk in the MainLoop
-                    _session0.Transmit(new OutgoingCommand(new Impl.ConnectionClose(reason.ReplyCode, reason.ReplyText, 0, 0)));
+                    _session0.Transmit(new ConnectionClose(reason.ReplyCode, reason.ReplyText, 0, 0));
                 }
                 catch (AlreadyClosedException)
                 {
@@ -397,7 +404,7 @@ namespace RabbitMQ.Client.Framing.Impl
                 _session0.SetSessionClosing(false);
                 try
                 {
-                    _session0.Transmit(new OutgoingCommand(new ConnectionClose(hpe.ShutdownReason.ReplyCode, hpe.ShutdownReason.ReplyText, 0, 0)));
+                    _session0.Transmit(new ConnectionClose(hpe.ShutdownReason.ReplyCode, hpe.ShutdownReason.ReplyText, 0, 0));
                     return true;
                 }
                 catch (IOException ioe)
@@ -634,7 +641,7 @@ namespace RabbitMQ.Client.Framing.Impl
             // our peer. The peer will respond through the lower
             // layers - specifically, through the QuiescingSession we
             // installed above.
-            newSession.Transmit(new OutgoingCommand(new Impl.ChannelClose(pe.ReplyCode, pe.Message, 0, 0)));
+            newSession.Transmit(new ChannelClose(pe.ReplyCode, pe.Message, 0, 0));
         }
 
         private bool SetCloseReason(ShutdownEventArgs reason)
@@ -914,9 +921,9 @@ namespace RabbitMQ.Client.Framing.Impl
 
             uint frameMax = NegotiatedMaxValue(_factory.RequestedFrameMax, connectionTune.m_frameMax);
             FrameMax = frameMax;
+            MaxPayloadSize = frameMax == 0 ? int.MaxValue : (int)frameMax - Client.Impl.Framing.BaseFrameSize;
 
-            TimeSpan requestedHeartbeat = _factory.RequestedHeartbeat;
-            uint heartbeatInSeconds = NegotiatedMaxValue((uint)requestedHeartbeat.TotalSeconds, (uint)connectionTune.m_heartbeatInSeconds);
+            uint heartbeatInSeconds = NegotiatedMaxValue((uint)_factory.RequestedHeartbeat.TotalSeconds, (uint)connectionTune.m_heartbeatInSeconds);
             Heartbeat = TimeSpan.FromSeconds(heartbeatInSeconds);
 
             _model0.ConnectionTuneOk(channelMax, frameMax, (ushort)Heartbeat.TotalSeconds);

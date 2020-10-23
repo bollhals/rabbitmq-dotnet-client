@@ -30,30 +30,17 @@
 //---------------------------------------------------------------------------
 
 using System;
-using System.Text;
 using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class BasicReturn : Client.Impl.MethodBase
+    internal readonly struct BasicReturn : IAmqpMethod
     {
-        public ushort _replyCode;
-        public string _replyText;
-        public string _exchange;
-        public string _routingKey;
-
-        public BasicReturn()
-        {
-        }
-
-        public BasicReturn(ushort ReplyCode, string ReplyText, string Exchange, string RoutingKey)
-        {
-            _replyCode = ReplyCode;
-            _replyText = ReplyText;
-            _exchange = Exchange;
-            _routingKey = RoutingKey;
-        }
+        public readonly ushort _replyCode;
+        public readonly string _replyText;
+        public readonly string _exchange;
+        public readonly string _routingKey;
 
         public BasicReturn(ReadOnlySpan<byte> span)
         {
@@ -63,25 +50,6 @@ namespace RabbitMQ.Client.Framing.Impl
             WireFormatting.ReadShortstr(span.Slice(offset), out _routingKey);
         }
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicReturn;
-        public override string ProtocolMethodName => "basic.return";
-        public override bool HasContent => true;
-
-        public override int WriteArgumentsTo(Span<byte> span)
-        {
-            int offset = WireFormatting.WriteShort(span, _replyCode);
-            offset += WireFormatting.WriteShortstr(span.Slice(offset), _replyText);
-            offset += WireFormatting.WriteShortstr(span.Slice(offset), _exchange);
-            return offset + WireFormatting.WriteShortstr(span.Slice(offset), _routingKey);
-        }
-
-        public override int GetRequiredBufferSize()
-        {
-            int bufferSize = 2 + 1 + 1 + 1; // bytes for _replyCode, length of _replyText, length of _exchange, length of _routingKey
-            bufferSize += WireFormatting.GetByteCount(_replyText); // _replyText in bytes
-            bufferSize += WireFormatting.GetByteCount(_exchange); // _exchange in bytes
-            bufferSize += WireFormatting.GetByteCount(_routingKey); // _routingKey in bytes
-            return bufferSize;
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicReturn;
     }
 }

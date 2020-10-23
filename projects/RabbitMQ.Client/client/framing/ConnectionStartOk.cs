@@ -37,16 +37,12 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ConnectionStartOk : MethodBase
+    internal readonly struct ConnectionStartOk : IOutgoingAmqpMethod
     {
-        public IDictionary<string, object> _clientProperties;
-        public string _mechanism;
-        public byte[] _response;
-        public string _locale;
-
-        public ConnectionStartOk()
-        {
-        }
+        public readonly IDictionary<string, object> _clientProperties;
+        public readonly string _mechanism;
+        public readonly byte[] _response;
+        public readonly string _locale;
 
         public ConnectionStartOk(IDictionary<string, object> ClientProperties, string Mechanism, byte[] Response, string Locale)
         {
@@ -56,20 +52,9 @@ namespace RabbitMQ.Client.Framing.Impl
             _locale = Locale;
         }
 
-        public ConnectionStartOk(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadDictionary(span, out var tmpDictionary);
-            _clientProperties = tmpDictionary;
-            offset += WireFormatting.ReadShortstr(span, out _mechanism);
-            offset += WireFormatting.ReadLongstr(span, out _response);
-            WireFormatting.ReadShortstr(span.Slice(offset), out _locale);
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ConnectionStartOk;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ConnectionStartOk;
-        public override string ProtocolMethodName => "connection.start-ok";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
             int offset = WireFormatting.WriteTable(span, _clientProperties);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _mechanism);
@@ -77,7 +62,7 @@ namespace RabbitMQ.Client.Framing.Impl
             return offset + WireFormatting.WriteShortstr(span.Slice(offset), _locale);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 1 + 4 +1; // bytes for length of _mechanism, length of _response, length of _locale
             bufferSize += WireFormatting.GetTableByteCount(_clientProperties); // _clientProperties in bytes

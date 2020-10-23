@@ -36,16 +36,12 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ConnectionClose : Client.Impl.MethodBase
+    internal readonly struct ConnectionClose : IOutgoingAmqpMethod
     {
-        public ushort _replyCode;
-        public string _replyText;
-        public ushort _classId;
-        public ushort _methodId;
-
-        public ConnectionClose()
-        {
-        }
+        public readonly ushort _replyCode;
+        public readonly string _replyText;
+        public readonly ushort _classId;
+        public readonly ushort _methodId;
 
         public ConnectionClose(ushort ReplyCode, string ReplyText, ushort ClassId, ushort MethodId)
         {
@@ -63,11 +59,9 @@ namespace RabbitMQ.Client.Framing.Impl
             WireFormatting.ReadShort(span.Slice(offset), out _methodId);
         }
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ConnectionClose;
-        public override string ProtocolMethodName => "connection.close";
-        public override bool HasContent => false;
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ConnectionClose;
 
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
             int offset = WireFormatting.WriteShort(span, _replyCode);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _replyText);
@@ -75,7 +69,7 @@ namespace RabbitMQ.Client.Framing.Impl
             return offset + WireFormatting.WriteShort(span.Slice(offset), _methodId);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 2 + 2; // bytes for _replyCode, length of _replyText, _classId, _methodId
             bufferSize += WireFormatting.GetByteCount(_replyText); // _replyText in bytes
