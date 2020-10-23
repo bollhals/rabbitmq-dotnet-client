@@ -30,6 +30,7 @@
 //---------------------------------------------------------------------------
 
 using System;
+using System.Reflection;
 using System.Threading;
 
 using NUnit.Framework;
@@ -77,8 +78,11 @@ namespace RabbitMQ.Client.Unit
             {
                 BasicGetResult message = ch.BasicGet(QueueName, false);
 
-                var fullModel = ch as IFullModel;
-                fullModel.HandleBasicNack(message.DeliveryTag, false, false);
+                IModel actualModel = ((AutorecoveringModel)ch).Delegate;
+                actualModel
+                    .GetType()
+                    .GetMethod("HandleAckNack", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(actualModel, new object[] { message.DeliveryTag, false, true });
 
                 Assert.IsFalse(ch.WaitForConfirms(TimeSpan.FromMilliseconds(1)));
             });

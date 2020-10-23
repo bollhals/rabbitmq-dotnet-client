@@ -65,26 +65,13 @@ namespace RabbitMQ.Client.Framing.Impl
             get { return new AmqpVersion(MajorVersion, MinorVersion); }
         }
 
-        public bool CanSendWhileClosed(MethodBase method)
+        public bool CanSendWhileClosed(ProtocolCommandId commandId)
         {
-            return method is Impl.ChannelCloseOk;
-        }
-
-        public void CreateChannelClose(ushort reasonCode,
-            string reasonText,
-            out OutgoingCommand request)
-        {
-            request = new OutgoingCommand(new Impl.ChannelClose(reasonCode, reasonText, 0, 0));
-        }
-
-        public void CreateConnectionClose(ushort reasonCode, string reasonText, out OutgoingCommand request, out ProtocolCommandId replyProtocolCommandId)
-        {
-            request = new OutgoingCommand(new Impl.ConnectionClose(reasonCode, reasonText, 0, 0));
-            replyProtocolCommandId = ProtocolCommandId.ConnectionCloseOk;
+            return commandId == ProtocolCommandId.ChannelCloseOk;
         }
 
         internal abstract ContentHeaderBase DecodeContentHeaderFrom(ushort classId, ReadOnlySpan<byte> span);
-        internal abstract MethodBase DecodeMethodFrom(ReadOnlySpan<byte> reader);
+        internal abstract ProtocolCommandId DecodeCommandIdFrom(ReadOnlySpan<byte> span);
 
         public override bool Equals(object obj)
         {

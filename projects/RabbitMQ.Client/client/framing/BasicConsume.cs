@@ -37,24 +37,21 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class BasicConsume : MethodBase
+    internal readonly struct BasicConsume : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _queue;
-        public string _consumerTag;
-        public bool _noLocal;
-        public bool _noAck;
-        public bool _exclusive;
-        public bool _nowait;
-        public IDictionary<string, object> _arguments;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _queue;
+        public readonly string _consumerTag;
+        public readonly bool _noLocal;
+        public readonly bool _noAck;
+        public readonly bool _exclusive;
+        public readonly bool _nowait;
+        public readonly IDictionary<string, object> _arguments;
 
-        public BasicConsume()
+        public BasicConsume(string Queue, string ConsumerTag, bool NoLocal, bool NoAck, bool Exclusive, bool Nowait, IDictionary<string, object> Arguments)
         {
-        }
-
-        public BasicConsume(ushort Reserved1, string Queue, string ConsumerTag, bool NoLocal, bool NoAck, bool Exclusive, bool Nowait, IDictionary<string, object> Arguments)
-        {
-            _reserved1 = Reserved1;
             _queue = Queue;
             _consumerTag = ConsumerTag;
             _noLocal = NoLocal;
@@ -64,30 +61,18 @@ namespace RabbitMQ.Client.Framing.Impl
             _arguments = Arguments;
         }
 
-        public BasicConsume(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span, out _queue);
-            offset += WireFormatting.ReadShortstr(span, out _consumerTag);
-            offset += WireFormatting.ReadBits(span.Slice(offset), out _noLocal, out _noAck, out _exclusive, out _nowait);
-            WireFormatting.ReadDictionary(span.Slice(offset), out var tmpDictionary);
-            _arguments = tmpDictionary;
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicConsume;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicConsume;
-        public override string ProtocolMethodName => "basic.consume";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _queue);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _consumerTag);
             offset += WireFormatting.WriteBits(span.Slice(offset), _noLocal, _noAck, _exclusive, _nowait);
             return offset + WireFormatting.WriteTable(span.Slice(offset), _arguments);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1 + 1; // bytes for _reserved1, length of _queue, length of _consumerTag, bit fields
             bufferSize += WireFormatting.GetByteCount(_queue); // _queue in bytes

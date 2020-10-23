@@ -35,48 +35,35 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class BasicPublish : Client.Impl.MethodBase
+    internal readonly struct BasicPublish : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _exchange;
-        public string _routingKey;
-        public bool _mandatory;
-        public bool _immediate;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _exchange;
+        public readonly string _routingKey;
+        public readonly bool _mandatory;
+        public readonly bool _immediate;
 
-        public BasicPublish()
+        public BasicPublish(string Exchange, string RoutingKey, bool Mandatory, bool Immediate)
         {
-        }
-
-        public BasicPublish(ushort Reserved1, string Exchange, string RoutingKey, bool Mandatory, bool Immediate)
-        {
-            _reserved1 = Reserved1;
             _exchange = Exchange;
             _routingKey = RoutingKey;
             _mandatory = Mandatory;
             _immediate = Immediate;
         }
 
-        public BasicPublish(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _exchange);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _routingKey);
-            WireFormatting.ReadBits(span.Slice(offset), out _mandatory, out _immediate);
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicPublish;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicPublish;
-        public override string ProtocolMethodName => "basic.publish";
-        public override bool HasContent => true;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _exchange);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _routingKey);
             return offset + WireFormatting.WriteBits(span.Slice(offset), _mandatory, _immediate);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1 + 1; // bytes for _reserved1, length of _exchange, length of _routingKey, bit fields
             bufferSize += WireFormatting.GetByteCount(_exchange); // _exchange in bytes
@@ -85,7 +72,7 @@ namespace RabbitMQ.Client.Framing.Impl
         }
     }
 
-    internal sealed class BasicPublishMemory : Client.Impl.MethodBase
+    internal readonly struct BasicPublishMemory : IOutgoingAmqpMethod
     {
         /* unused, therefore commented out
          * public readonly ushort _reserved1;
@@ -103,11 +90,9 @@ namespace RabbitMQ.Client.Framing.Impl
             _immediate = Immediate;
         }
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicPublish;
-        public override string ProtocolMethodName => "basic.publish";
-        public override bool HasContent => true;
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicPublish;
 
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
             int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _exchange.Span);
@@ -115,7 +100,7 @@ namespace RabbitMQ.Client.Framing.Impl
             return offset + WireFormatting.WriteBits(span.Slice(offset), _mandatory, _immediate);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             return 2 + 1 + 1 + 1 + // bytes for _reserved1, length of _exchange, length of _routingKey, bit fields
                    _exchange.Length + _routingKey.Length;

@@ -36,44 +36,32 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ExchangeDelete : Client.Impl.MethodBase
+    internal readonly struct ExchangeDelete : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _exchange;
-        public bool _ifUnused;
-        public bool _nowait;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _exchange;
+        public readonly bool _ifUnused;
+        public readonly bool _nowait;
 
-        public ExchangeDelete()
+        public ExchangeDelete(string Exchange, bool IfUnused, bool Nowait)
         {
-        }
-
-        public ExchangeDelete(ushort Reserved1, string Exchange, bool IfUnused, bool Nowait)
-        {
-            _reserved1 = Reserved1;
             _exchange = Exchange;
             _ifUnused = IfUnused;
             _nowait = Nowait;
         }
 
-        public ExchangeDelete(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _exchange);
-            WireFormatting.ReadBits(span.Slice(offset), out _ifUnused, out _nowait);
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ExchangeDelete;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ExchangeDelete;
-        public override string ProtocolMethodName => "exchange.delete";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _exchange);
             return offset + WireFormatting.WriteBits(span.Slice(offset), _ifUnused, _nowait);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1; // bytes for _reserved1, length of _exchange, bit fields
             bufferSize += WireFormatting.GetByteCount(_exchange); // _exchange in bytes

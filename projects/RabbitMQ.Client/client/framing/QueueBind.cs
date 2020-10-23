@@ -37,22 +37,19 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class QueueBind : MethodBase
+    internal readonly struct QueueBind : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _queue;
-        public string _exchange;
-        public string _routingKey;
-        public bool _nowait;
-        public IDictionary<string, object> _arguments;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _queue;
+        public readonly string _exchange;
+        public readonly string _routingKey;
+        public readonly bool _nowait;
+        public readonly IDictionary<string, object> _arguments;
 
-        public QueueBind()
+        public QueueBind(string Queue, string Exchange, string RoutingKey, bool Nowait, IDictionary<string, object> Arguments)
         {
-        }
-
-        public QueueBind(ushort Reserved1, string Queue, string Exchange, string RoutingKey, bool Nowait, IDictionary<string, object> Arguments)
-        {
-            _reserved1 = Reserved1;
             _queue = Queue;
             _exchange = Exchange;
             _routingKey = RoutingKey;
@@ -60,24 +57,11 @@ namespace RabbitMQ.Client.Framing.Impl
             _arguments = Arguments;
         }
 
-        public QueueBind(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _queue);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _exchange);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _routingKey);
-            offset += WireFormatting.ReadBits(span.Slice(offset), out _nowait);
-            WireFormatting.ReadDictionary(span.Slice(offset), out var tmpDictionary);
-            _arguments = tmpDictionary;
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.QueueBind;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.QueueBind;
-        public override string ProtocolMethodName => "queue.bind";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _queue);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _exchange);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _routingKey);
@@ -85,7 +69,7 @@ namespace RabbitMQ.Client.Framing.Impl
             return offset + WireFormatting.WriteTable(span.Slice(offset), _arguments);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1 + 1 + 1; // bytes for _reserved1, length of _queue, length of _exchange, length of _routingKey, bit fields
             bufferSize += WireFormatting.GetByteCount(_queue); // _queue in bytes

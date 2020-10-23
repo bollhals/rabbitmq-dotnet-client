@@ -36,42 +36,30 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class BasicGet : Client.Impl.MethodBase
+    internal readonly struct BasicGet : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _queue;
-        public bool _noAck;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _queue;
+        public readonly bool _noAck;
 
-        public BasicGet()
+        public BasicGet(string Queue, bool NoAck)
         {
-        }
-
-        public BasicGet(ushort Reserved1, string Queue, bool NoAck)
-        {
-            _reserved1 = Reserved1;
             _queue = Queue;
             _noAck = NoAck;
         }
 
-        public BasicGet(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _queue);
-            WireFormatting.ReadBits(span.Slice(offset), out _noAck);
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicGet;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicGet;
-        public override string ProtocolMethodName => "basic.get";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _queue);
             return offset + WireFormatting.WriteBits(span.Slice(offset), _noAck);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1; // bytes for _reserved1, length of _queue, bit fields
             bufferSize += WireFormatting.GetByteCount(_queue); // _queue in bytes

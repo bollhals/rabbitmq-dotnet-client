@@ -49,8 +49,7 @@ namespace RabbitMQ.Client.Impl
         {
             if (frame.Type == FrameType.FrameMethod)
             {
-                MethodBase method = Connection.Protocol.DecodeMethodFrom(frame.Payload.Span);
-                switch (method.ProtocolCommandId)
+                switch (Connection.Protocol.DecodeCommandIdFrom(frame.Payload.Span))
                 {
                     case ProtocolCommandId.ChannelCloseOk:
                         // This is the reply we were looking for. Release
@@ -61,7 +60,7 @@ namespace RabbitMQ.Client.Impl
                     case ProtocolCommandId.ChannelClose:
                         // We're already shutting down the channel, so
                         // just send back an ok.
-                        Transmit(new OutgoingCommand(new ConnectionCloseOk()));
+                        Transmit(new ConnectionCloseOk());
                         break;
                 }
             }

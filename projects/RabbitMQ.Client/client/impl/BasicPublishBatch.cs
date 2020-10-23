@@ -31,47 +31,93 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using RabbitMQ.Client.Framing.Impl;
 
 namespace RabbitMQ.Client.Impl
 {
     internal sealed class BasicPublishBatch : IBasicPublishBatch
     {
-        private readonly List<OutgoingCommand> _commands;
         private readonly ModelBase _model;
+        private readonly int _sizeHint;
+        private List<CommandParts<BasicPublish>> _publishCommands;
+        private List<CommandParts<BasicPublishMemory>> _publishMemoryCommands;
 
         internal BasicPublishBatch (ModelBase model)
         {
             _model = model;
-            _commands = new List<OutgoingCommand>();
+            _sizeHint = 4;
         }
 
         internal BasicPublishBatch (ModelBase model, int sizeHint)
         {
             _model = model;
-            _commands = new List<OutgoingCommand>(sizeHint);
+            _sizeHint = sizeHint;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void UsingBasicPublish()
+        {
+            if (_publishCommands is null)
+            {
+                if (_publishMemoryCommands is null)
+                {
+                    _publishCommands = new List<CommandParts<BasicPublish>>(_sizeHint);
+                }
+                else
+                {
+                    ThrowDoNotMixPublishMethods();
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void UsingBasicPublishMemory()
+        {
+            if (_publishMemoryCommands is null)
+            {
+                if (_publishCommands is null)
+                {
+                    _publishMemoryCommands = new List<CommandParts<BasicPublishMemory>>(_sizeHint);
+                }
+                else
+                {
+                    ThrowDoNotMixPublishMethods();
+                }
+            }
+        }
+
+        private static void ThrowDoNotMixPublishMethods()
+        {
+            throw new InvalidOperationException($"Not allowed to mix the {nameof(Add)} method for string and ReadOnlyMemory<byte>.");
         }
 
         public void Add(string exchange, string routingKey, bool mandatory, IBasicProperties basicProperties, ReadOnlyMemory<byte> body)
         {
-            var method = new BasicPublish
-            {
-                _exchange = exchange,
-                _routingKey = routingKey,
-                _mandatory = mandatory
-            };
-            _commands.Add(new OutgoingCommand(method, (ContentHeaderBase)(basicProperties ?? _model._emptyBasicProperties), body));
+            UsingBasicPublish();
+            var method = new BasicPublish(exchange, routingKey, mandatory, default);
+            _publishCommands.Add(new CommandParts<BasicPublish>(method, (ContentHeaderBase)(basicProperties ?? _model._emptyBasicProperties), body));
         }
 
         public void Add(CachedString exchange, CachedString routingKey, bool mandatory, IBasicProperties basicProperties, ReadOnlyMemory<byte> body)
         {
+            UsingBasicPublishMemory();
             var method = new BasicPublishMemory(exchange.Bytes, routingKey.Bytes, mandatory, default);
-            _commands.Add(new OutgoingCommand(method, (ContentHeaderBase)(basicProperties ?? _model._emptyBasicProperties), body));
+            _publishMemoryCommands.Add(new CommandParts<BasicPublishMemory>(method, (ContentHeaderBase)(basicProperties ?? _model._emptyBasicProperties), body));
         }
 
         public void Publish()
         {
-            _model.SendCommands(_commands);
+            if (_publishCommands != null)
+            {
+                _model.SendCommands(_publishCommands);
+                return;
+            }
+
+            if (_publishMemoryCommands != null)
+            {
+                _model.SendCommands(_publishMemoryCommands);
+            }
         }
     }
 }

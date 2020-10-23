@@ -4,6 +4,7 @@ namespace RabbitMQ.Client.client.framing
 {
     internal enum ProtocolCommandId : uint
     {
+        None                     = 0,
         BasicQos                 = (ClassConstants.Basic << 16) | BasicMethodConstants.Qos,
         BasicQosOk               = (ClassConstants.Basic << 16) | BasicMethodConstants.QosOk,
         BasicConsume             = (ClassConstants.Basic << 16) | BasicMethodConstants.Consume,

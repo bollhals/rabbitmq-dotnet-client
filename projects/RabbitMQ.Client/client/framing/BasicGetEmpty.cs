@@ -29,45 +29,16 @@
 //  Copyright (c) 2007-2020 VMware, Inc.  All rights reserved.
 //---------------------------------------------------------------------------
 
-using System;
-using System.Text;
 using RabbitMQ.Client.client.framing;
-using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class BasicGetEmpty : Client.Impl.MethodBase
+    internal readonly struct BasicGetEmpty : IAmqpMethod
     {
-        public string _reserved1;
+        /* unused, therefore commented out
+         * public readonly string _reserved1;
+         */
 
-        public BasicGetEmpty()
-        {
-        }
-
-        public BasicGetEmpty(string Reserved1)
-        {
-            _reserved1 = Reserved1;
-        }
-
-        public BasicGetEmpty(ReadOnlySpan<byte> span)
-        {
-            WireFormatting.ReadShortstr(span, out _reserved1);
-        }
-
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicGetEmpty;
-        public override string ProtocolMethodName => "basic.get-empty";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
-        {
-            return WireFormatting.WriteShortstr(span, _reserved1);
-        }
-
-        public override int GetRequiredBufferSize()
-        {
-            int bufferSize = 1; // bytes for length of _reserved1
-            bufferSize += WireFormatting.GetByteCount(_reserved1); // _reserved1 in bytes
-            return bufferSize;
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicGetEmpty;
     }
 }

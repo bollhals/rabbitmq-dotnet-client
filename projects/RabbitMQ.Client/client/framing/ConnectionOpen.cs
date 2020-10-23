@@ -36,46 +36,33 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ConnectionOpen : Client.Impl.MethodBase
+    internal readonly struct ConnectionOpen : IOutgoingAmqpMethod
     {
-        public string _virtualHost;
-        public string _reserved1;
-        public bool _reserved2;
+        public readonly string _virtualHost;
+        public readonly string _capabilities;
+        public readonly bool _insist;
 
-        public ConnectionOpen()
-        {
-        }
-
-        public ConnectionOpen(string VirtualHost, string Reserved1, bool Reserved2)
+        public ConnectionOpen(string VirtualHost, string Capabilities, bool Insist)
         {
             _virtualHost = VirtualHost;
-            _reserved1 = Reserved1;
-            _reserved2 = Reserved2;
+            _capabilities = Capabilities;
+            _insist = Insist;
         }
 
-        public ConnectionOpen(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShortstr(span, out _virtualHost);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _reserved1);
-            WireFormatting.ReadBits(span.Slice(offset), out _reserved2);
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ConnectionOpen;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ConnectionOpen;
-        public override string ProtocolMethodName => "connection.open";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
             int offset = WireFormatting.WriteShortstr(span, _virtualHost);
-            offset += WireFormatting.WriteShortstr(span.Slice(offset), _reserved1);
-            return offset + WireFormatting.WriteBits(span.Slice(offset), _reserved2);
+            offset += WireFormatting.WriteShortstr(span.Slice(offset), _capabilities);
+            return offset + WireFormatting.WriteBits(span.Slice(offset), _insist);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
-            int bufferSize = 1 + 1 + 1; // bytes for length of _virtualHost, length of _reserved1, bit fields
+            int bufferSize = 1 + 1 + 1; // bytes for length of _virtualHost, length of _capabilities, bit fields
             bufferSize += WireFormatting.GetByteCount(_virtualHost); // _virtualHost in bytes
-            bufferSize += WireFormatting.GetByteCount(_reserved1); // _reserved1 in bytes
+            bufferSize += WireFormatting.GetByteCount(_capabilities); // _capabilities in bytes
             return bufferSize;
         }
     }

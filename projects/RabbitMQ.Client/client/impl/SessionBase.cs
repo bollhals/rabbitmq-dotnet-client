@@ -31,7 +31,7 @@
 
 using System;
 using System.Collections.Generic;
-
+using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Exceptions;
 using RabbitMQ.Client.Framing.Impl;
 
@@ -159,31 +159,48 @@ namespace RabbitMQ.Client.Impl
             OnSessionShutdown(CloseReason);
         }
 
-        public virtual void Transmit(in OutgoingCommand cmd)
+        public virtual void Transmit<T>(in T cmd) where T : struct, IOutgoingAmqpMethod
         {
             if (CloseReason != null)
             {
-                lock (_shutdownLock)
+                CheckCanSendWhileClosed(cmd.ProtocolCommandId);
+            }
+
+            Connection.Write(Framing.SerializeToFrames(cmd, ChannelNumber));
+        }
+
+        public void Transmit<T>(in T cmd, ContentHeaderBase header, ReadOnlyMemory<byte> body) where T : struct, IOutgoingAmqpMethod
+        {
+            if (CloseReason != null)
+            {
+                CheckCanSendWhileClosed(cmd.ProtocolCommandId);
+            }
+
+            Connection.Write(Framing.SerializeToFrames(cmd, header, body, ChannelNumber, Connection.MaxPayloadSize));
+        }
+
+        private void CheckCanSendWhileClosed(ProtocolCommandId commandId)
+        {
+            lock (_shutdownLock)
+            {
+                if (CloseReason != null)
                 {
-                    if (CloseReason != null)
+                    if (!Connection.Protocol.CanSendWhileClosed(commandId))
                     {
-                        if (!Connection.Protocol.CanSendWhileClosed(cmd.Method))
-                        {
-                            throw new AlreadyClosedException(CloseReason);
-                        }
+                        throw new AlreadyClosedException(CloseReason);
                     }
                 }
             }
-            // We used to transmit *inside* the lock to avoid interleaving
-            // of frames within a channel.  But that is fixed in socket frame handler instead, so no need to lock.
-            cmd.Transmit(ChannelNumber, Connection);
         }
 
-        public virtual void Transmit(IList<OutgoingCommand> cmds)
+        public void Transmit<T>(List<CommandParts<T>> cmds) where T : struct, IOutgoingAmqpMethod
         {
-            for (int i = 0; i < cmds.Count; i++)
+            int maxPayloadSize = Connection.MaxPayloadSize;
+            ushort channelNumber = ChannelNumber;
+
+            foreach (var parts in cmds)
             {
-                cmds[i].Transmit(ChannelNumber, Connection);
+                Connection.Write(Framing.SerializeToFrames(parts.Method, parts.Header, parts.Body, channelNumber, maxPayloadSize));
             }
         }
     }

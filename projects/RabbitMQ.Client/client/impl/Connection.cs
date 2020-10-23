@@ -39,7 +39,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
+using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
 using RabbitMQ.Client.Impl;
@@ -97,7 +97,6 @@ namespace RabbitMQ.Client.Framing.Impl
         {
             ClientProvidedName = clientProvidedName;
             KnownHosts = null;
-            FrameMax = 0;
             _factory = factory;
             _frameHandler = frameHandler;
 
@@ -212,7 +211,14 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public AmqpTcpEndpoint Endpoint => _frameHandler.Endpoint;
 
-        public uint FrameMax { get; set; }
+        public uint FrameMax { get; private set; }
+
+        /// <summary>
+        /// The maximum payload size for this connection.
+        /// </summary>
+        /// <remarks>Compared to <see cref="FrameMax"/> unlimited, unlimited means here <see cref="int.MaxValue"/>.
+        /// Also it is reduced by the required framing bytes as in <see cref="RabbitMQ.Client.Impl.Framing.BaseFrameSize"/>.</remarks>
+        internal int MaxPayloadSize { get; private set; }
 
         public TimeSpan Heartbeat
         {
@@ -307,7 +313,7 @@ namespace RabbitMQ.Client.Framing.Impl
                 {
                     // Try to send connection.close
                     // Wait for CloseOk in the MainLoop
-                    _session0.Transmit(ConnectionCloseWrapper(reason.ReplyCode, reason.ReplyText));
+                    _session0.Transmit(new ConnectionClose(reason.ReplyCode, reason.ReplyText, 0, 0));
                 }
                 catch (AlreadyClosedException)
                 {
@@ -388,12 +394,6 @@ namespace RabbitMQ.Client.Framing.Impl
             }
         }
 
-        public OutgoingCommand ConnectionCloseWrapper(ushort reasonCode, string reasonText)
-        {
-            Protocol.CreateConnectionClose(reasonCode, reasonText, out OutgoingCommand request, out _);
-            return request;
-        }
-
         public ISession CreateSession()
         {
             return _sessionManager.Create();
@@ -453,9 +453,7 @@ namespace RabbitMQ.Client.Framing.Impl
                 _session0.SetSessionClosing(false);
                 try
                 {
-                    _session0.Transmit(ConnectionCloseWrapper(
-                        hpe.ShutdownReason.ReplyCode,
-                        hpe.ShutdownReason.ReplyText));
+                    _session0.Transmit(new ConnectionClose(hpe.ShutdownReason.ReplyCode, hpe.ShutdownReason.ReplyText, 0, 0));
                     return true;
                 }
                 catch (IOException ioe)
@@ -724,7 +722,7 @@ namespace RabbitMQ.Client.Framing.Impl
             // our peer. The peer will respond through the lower
             // layers - specifically, through the QuiescingSession we
             // installed above.
-            newSession.Transmit(ChannelCloseWrapper(pe.ReplyCode, pe.Message));
+            newSession.Transmit(new ChannelClose(pe.ReplyCode, pe.Message, 0, 0));
         }
 
         public bool SetCloseReason(ShutdownEventArgs reason)
@@ -936,7 +934,7 @@ namespace RabbitMQ.Client.Framing.Impl
             ISession session = CreateSession();
             var model = (IFullModel)Protocol.CreateModel(session, ConsumerWorkService);
             model.ContinuationTimeout = _factory.ContinuationTimeout;
-            model._Private_ChannelOpen("");
+            model._Private_ChannelOpen();
             return model;
         }
 
@@ -988,12 +986,6 @@ namespace RabbitMQ.Client.Framing.Impl
             }
 
             // dispose unmanaged resources
-        }
-
-        internal OutgoingCommand ChannelCloseWrapper(ushort reasonCode, string reasonText)
-        {
-            Protocol.CreateChannelClose(reasonCode, reasonText, out OutgoingCommand request);
-            return request;
         }
 
         private void StartAndTune()
@@ -1079,17 +1071,14 @@ namespace RabbitMQ.Client.Framing.Impl
                     "Possibly caused by authentication failure", e);
             }
 
-            ushort channelMax = (ushort)NegotiatedMaxValue(_factory.RequestedChannelMax,
-                connectionTune.m_channelMax);
+            ushort channelMax = (ushort)NegotiatedMaxValue(_factory.RequestedChannelMax, connectionTune.m_channelMax);
             _sessionManager = new SessionManager(this, channelMax);
 
-            uint frameMax = NegotiatedMaxValue(_factory.RequestedFrameMax,
-                connectionTune.m_frameMax);
+            uint frameMax = NegotiatedMaxValue(_factory.RequestedFrameMax, connectionTune.m_frameMax);
             FrameMax = frameMax;
+            MaxPayloadSize = frameMax == 0 ? int.MaxValue : (int)frameMax - Client.Impl.Framing.BaseFrameSize;
 
-            TimeSpan requestedHeartbeat = _factory.RequestedHeartbeat;
-            uint heartbeatInSeconds = NegotiatedMaxValue((uint)requestedHeartbeat.TotalSeconds,
-                (uint)connectionTune.m_heartbeatInSeconds);
+            uint heartbeatInSeconds = NegotiatedMaxValue((uint)_factory.RequestedHeartbeat.TotalSeconds, connectionTune.m_heartbeatInSeconds);
             Heartbeat = TimeSpan.FromSeconds(heartbeatInSeconds);
 
             _model0.ConnectionTuneOk(channelMax, frameMax, (ushort)Heartbeat.TotalSeconds);

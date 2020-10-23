@@ -34,10 +34,11 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
+using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
 using RabbitMQ.Client.Framing.Impl;
@@ -352,7 +353,7 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public void HandleCommand(in IncomingCommand cmd)
+        private void HandleCommand(in IncomingCommand cmd)
         {
             if (!DispatchAsynchronous(in cmd)) // Was asynchronous. Already processed. No need to process further.
             {
@@ -360,41 +361,61 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public T ModelRpc<T>(MethodBase method) where T : MethodBase
+        protected void ModelRpc<TMethod>(in TMethod method, ProtocolCommandId returnCommandId)
+            where TMethod : struct, IOutgoingAmqpMethod
         {
             var k = new SimpleBlockingRpcContinuation();
-            var outgoingCommand = new OutgoingCommand(method);
-            MethodBase baseResult;
+            IncomingCommand reply;
             lock (_rpcLock)
             {
-                TransmitAndEnqueue(outgoingCommand, k);
-                baseResult = k.GetReply(ContinuationTimeout).Method;
+                Enqueue(k);
+                Session.Transmit(method);
+                k.GetReply(ContinuationTimeout, out reply);
             }
 
-            if (baseResult is T result)
+            reply.ReturnMethodBuffer();
+
+            if (reply.CommandId != returnCommandId)
             {
-                return result;
+                throw new UnexpectedMethodException(reply.CommandId, returnCommandId);
             }
-
-            throw new UnexpectedMethodException(baseResult.ProtocolClassId, baseResult.ProtocolMethodId, baseResult.ProtocolMethodName);
         }
 
-        public void ModelSend(MethodBase method)
+        protected TReturn ModelRpc<TMethod, TReturn>(in TMethod method, ProtocolCommandId returnCommandId, Func<ReadOnlyMemory<byte>, TReturn> createFunc)
+            where TMethod : struct, IOutgoingAmqpMethod
         {
-            ModelSend(method, null, ReadOnlyMemory<byte>.Empty);
+            var k = new SimpleBlockingRpcContinuation();
+            IncomingCommand reply;
+
+            lock (_rpcLock)
+            {
+                Enqueue(k);
+                Session.Transmit(method);
+                k.GetReply(ContinuationTimeout, out reply);
+            }
+
+            if (reply.CommandId != returnCommandId)
+            {
+                reply.ReturnMethodBuffer();
+                throw new UnexpectedMethodException(reply.CommandId, returnCommandId);
+            }
+
+            var returnValue = createFunc(reply.MethodBytes);
+            reply.ReturnMethodBuffer();
+            return returnValue;
         }
 
-        public void ModelSend(MethodBase method, ContentHeaderBase header, ReadOnlyMemory<byte> body)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void ModelSend<T>(in T method) where T : struct, IOutgoingAmqpMethod
         {
-            if (method.HasContent)
-            {
-                _flowControlBlock.Wait();
-                Session.Transmit(new OutgoingCommand(method, header, body));
-            }
-            else
-            {
-                Session.Transmit(new OutgoingCommand(method, header, body));
-            }
+            Session.Transmit(method);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void ModelSend<T>(in T method, ContentHeaderBase header, ReadOnlyMemory<byte> body) where T : struct, IOutgoingAmqpMethod
+        {
+            _flowControlBlock.Wait();
+            Session.Transmit(method, header, body);
         }
 
         public void OnCallbackException(CallbackExceptionEventArgs args)
@@ -466,12 +487,6 @@ namespace RabbitMQ.Client.Impl
             return Session.ToString();
         }
 
-        public void TransmitAndEnqueue(in OutgoingCommand cmd, IRpcContinuation k)
-        {
-            Enqueue(k);
-            Session.Transmit(cmd);
-        }
-
         void IDisposable.Dispose()
         {
             Dispose(true);
@@ -492,35 +507,39 @@ namespace RabbitMQ.Client.Impl
             uint frameMax,
             ushort heartbeat);
 
-        public void HandleBasicAck(ulong deliveryTag, bool multiple)
+        protected void HandleBasicAck(in IncomingCommand cmd)
         {
+            var ack = new BasicAck(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             if (!_basicAcksWrapper.IsEmpty)
             {
                 var args = new BasicAckEventArgs
                 {
-                    DeliveryTag = deliveryTag,
-                    Multiple = multiple
+                    DeliveryTag = ack._deliveryTag,
+                    Multiple = ack._multiple
                 };
                 _basicAcksWrapper.Invoke(this, args);
             }
 
-            HandleAckNack(deliveryTag, multiple, false);
+            HandleAckNack(ack._deliveryTag, ack._multiple, false);
         }
 
-        public void HandleBasicNack(ulong deliveryTag, bool multiple, bool requeue)
+        protected void HandleBasicNack(in IncomingCommand cmd)
         {
+            var nack = new BasicNack(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             if (!_basicNacksWrapper.IsEmpty)
             {
                 var args = new BasicNackEventArgs
                 {
-                    DeliveryTag = deliveryTag,
-                    Multiple = multiple,
-                    Requeue = requeue
+                    DeliveryTag = nack._deliveryTag,
+                    Multiple = nack._multiple,
+                    Requeue = nack._requeue
                 };
                 _basicNacksWrapper.Invoke(this, args);
             }
 
-            HandleAckNack(deliveryTag, multiple, true);
+            HandleAckNack(nack._deliveryTag, nack._multiple, true);
         }
 
         protected void HandleAckNack(ulong deliveryTag, bool multiple, bool isNack)
@@ -568,8 +587,10 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public void HandleBasicCancel(string consumerTag, bool nowait)
+        protected void HandleBasicCancel(in IncomingCommand cmd)
         {
+            var consumerTag = new Client.Framing.Impl.BasicCancel(cmd.MethodBytes.Span)._consumerTag;
+            cmd.ReturnMethodBuffer();
             IBasicConsumer consumer;
             lock (_consumers)
             {
@@ -583,17 +604,11 @@ namespace RabbitMQ.Client.Impl
             ConsumerDispatcher.HandleBasicCancel(consumer, consumerTag);
         }
 
-        public void HandleBasicCancelOk(string consumerTag)
+        protected void HandleBasicCancelOk(in IncomingCommand cmd)
         {
-            var k =
-                (BasicConsumerRpcContinuation)_continuationQueue.Next();
-            /*
-                        Trace.Assert(k.m_consumerTag == consumerTag, string.Format(
-                            "Consumer tag mismatch during cancel: {0} != {1}",
-                            k.m_consumerTag,
-                            consumerTag
-                            ));
-            */
+            var consumerTag = new Client.Framing.Impl.BasicCancelOk(cmd.MethodBytes.Span)._consumerTag;
+            cmd.ReturnMethodBuffer();
+            var k = (BasicConsumerRpcContinuation)_continuationQueue.Next();
             lock (_consumers)
             {
                 k.m_consumer = _consumers[consumerTag];
@@ -603,10 +618,11 @@ namespace RabbitMQ.Client.Impl
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
-        public void HandleBasicConsumeOk(string consumerTag)
+        protected void HandleBasicConsumeOk(in IncomingCommand cmd)
         {
-            var k =
-                (BasicConsumerRpcContinuation)_continuationQueue.Next();
+            var consumerTag = new Client.Framing.Impl.BasicConsumeOk(cmd.MethodBytes.Span)._consumerTag;
+            cmd.ReturnMethodBuffer();
+            var k = (BasicConsumerRpcContinuation)_continuationQueue.Next();
             k.m_consumerTag = consumerTag;
             lock (_consumers)
             {
@@ -616,19 +632,14 @@ namespace RabbitMQ.Client.Impl
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
-        public virtual void HandleBasicDeliver(string consumerTag,
-            ulong deliveryTag,
-            bool redelivered,
-            string exchange,
-            string routingKey,
-            IBasicProperties basicProperties,
-            ReadOnlyMemory<byte> body,
-            byte[] rentedArray)
+        protected void HandleBasicDeliver(in IncomingCommand cmd)
         {
+            var method = new Client.Framing.Impl.BasicDeliver(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             IBasicConsumer consumer;
             lock (_consumers)
             {
-                consumer = _consumers[consumerTag];
+                consumer = _consumers[method._consumerTag];
             }
             if (consumer is null)
             {
@@ -643,78 +654,81 @@ namespace RabbitMQ.Client.Impl
             }
 
             ConsumerDispatcher.HandleBasicDeliver(consumer,
-                    consumerTag,
-                    deliveryTag,
-                    redelivered,
-                    exchange,
-                    routingKey,
-                    basicProperties,
-                    body,
-                    rentedArray);
+                    method._consumerTag,
+                    AdjustDeliveryTag(method._deliveryTag),
+                    method._redelivered,
+                    method._exchange,
+                    method._routingKey,
+                    (IBasicProperties)cmd.Header,
+                    cmd.Body,
+                    cmd.TakeoverPayload());
         }
 
-        public void HandleBasicGetEmpty()
+        protected void HandleBasicGetOk(in IncomingCommand cmd)
+        {
+            var method = new BasicGetOk(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
+            var k = (BasicGetRpcContinuation)_continuationQueue.Next();
+            k.m_result = new BasicGetResult(
+                AdjustDeliveryTag(method._deliveryTag),
+                method._redelivered,
+                method._exchange,
+                method._routingKey,
+                method._messageCount,
+                (IBasicProperties)cmd.Header,
+                cmd.Body,
+                cmd.TakeoverPayload());
+            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+        }
+
+        protected virtual ulong AdjustDeliveryTag(ulong deliveryTag)
+        {
+            return deliveryTag;
+        }
+
+        protected void HandleBasicGetEmpty()
         {
             var k = (BasicGetRpcContinuation)_continuationQueue.Next();
             k.m_result = null;
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
-        public virtual void HandleBasicGetOk(ulong deliveryTag,
-            bool redelivered,
-            string exchange,
-            string routingKey,
-            uint messageCount,
-            IBasicProperties basicProperties,
-            ReadOnlyMemory<byte> body,
-            byte[] rentedArray)
-        {
-            var k = (BasicGetRpcContinuation)_continuationQueue.Next();
-            k.m_result = new BasicGetResult(deliveryTag, redelivered, exchange, routingKey, messageCount, basicProperties, body, rentedArray);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
-        public void HandleBasicRecoverOk()
+        protected void HandleBasicRecoverOk()
         {
             var k = (SimpleBlockingRpcContinuation)_continuationQueue.Next();
             _basicRecoverOkWrapper.Invoke(this, EventArgs.Empty);
             k.HandleCommand(IncomingCommand.Empty);
         }
 
-        public void HandleBasicReturn(ushort replyCode,
-            string replyText,
-            string exchange,
-            string routingKey,
-            IBasicProperties basicProperties,
-            ReadOnlyMemory<byte> body,
-            byte[] rentedArray)
+        protected void HandleBasicReturn(in IncomingCommand cmd)
         {
             if (!_basicReturnWrapper.IsEmpty)
             {
+                var basicReturn = new BasicReturn(cmd.MethodBytes.Span);
                 var e = new BasicReturnEventArgs
                 {
-                    ReplyCode = replyCode,
-                    ReplyText = replyText,
-                    Exchange = exchange,
-                    RoutingKey = routingKey,
-                    BasicProperties = basicProperties,
-                    Body = body
+                    ReplyCode = basicReturn._replyCode,
+                    ReplyText = basicReturn._replyText,
+                    Exchange = basicReturn._exchange,
+                    RoutingKey = basicReturn._routingKey,
+                    BasicProperties = (IBasicProperties)cmd.Header,
+                    Body = cmd.Body
                 };
                 _basicReturnWrapper.Invoke(this, e);
             }
-            ArrayPool<byte>.Shared.Return(rentedArray);
+            cmd.ReturnMethodBuffer();
+            ArrayPool<byte>.Shared.Return(cmd.TakeoverPayload());
         }
 
-        public void HandleChannelClose(ushort replyCode,
-            string replyText,
-            ushort classId,
-            ushort methodId)
+        protected void HandleChannelClose(in IncomingCommand cmd)
         {
+            var channelClose = new ChannelClose(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             SetCloseReason(new ShutdownEventArgs(ShutdownInitiator.Peer,
-                replyCode,
-                replyText,
-                classId,
-                methodId));
+                channelClose._replyCode,
+                channelClose._replyText,
+                channelClose._classId,
+                channelClose._methodId));
 
             Session.Close(CloseReason, false);
             try
@@ -727,23 +741,25 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public void HandleChannelCloseOk()
+        protected void HandleChannelCloseOk()
         {
             FinishClose();
         }
 
-        public void HandleChannelFlow(bool active)
+        protected void HandleChannelFlow(in IncomingCommand cmd)
         {
+            var active = new ChannelFlow(cmd.MethodBytes.Span)._active;
+            cmd.ReturnMethodBuffer();
             if (active)
             {
                 _flowControlBlock.Set();
-                _Private_ChannelFlowOk(active);
             }
             else
             {
                 _flowControlBlock.Reset();
-                _Private_ChannelFlowOk(active);
             }
+            
+            _Private_ChannelFlowOk(active);
 
             if (!_flowControlWrapper.IsEmpty)
             {
@@ -751,24 +767,21 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public void HandleConnectionBlocked(string reason)
+        protected void HandleConnectionBlocked(in IncomingCommand cmd)
         {
+            var reason = new ConnectionBlocked(cmd.MethodBytes.Span)._reason;
+            cmd.ReturnMethodBuffer();
             Session.Connection.HandleConnectionBlocked(reason);
         }
 
-        public void HandleConnectionClose(ushort replyCode,
-            string replyText,
-            ushort classId,
-            ushort methodId)
+        protected void HandleConnectionClose(in IncomingCommand cmd)
         {
-            var reason = new ShutdownEventArgs(ShutdownInitiator.Peer,
-                replyCode,
-                replyText,
-                classId,
-                methodId);
+            var method = new ConnectionClose(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
+            var reason = new ShutdownEventArgs(ShutdownInitiator.Peer, method._replyCode, method._replyText, method._classId, method._methodId);
             try
             {
-                ((Connection)Session.Connection).InternalClose(reason);
+                Session.Connection.InternalClose(reason);
                 _Private_ConnectionCloseOk();
                 SetCloseReason(Session.Connection.CloseReason);
             }
@@ -784,8 +797,10 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public void HandleConnectionOpenOk(string knownHosts)
+        protected void HandleConnectionOpenOk(in IncomingCommand cmd)
         {
+            var knownHosts = new ConnectionOpenOk(cmd.MethodBytes.Span)._knownHosts;
+            cmd.ReturnMethodBuffer();
             var k = (ConnectionOpenContinuation)_continuationQueue.Next();
             k.m_redirect = false;
             k.m_host = null;
@@ -793,8 +808,10 @@ namespace RabbitMQ.Client.Impl
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
-        public void HandleConnectionSecure(byte[] challenge)
+        protected void HandleConnectionSecure(in IncomingCommand cmd)
         {
+            var challenge = new ConnectionSecure(cmd.MethodBytes.Span)._challenge;
+            cmd.ReturnMethodBuffer();
             var k = (ConnectionStartRpcContinuation)_continuationQueue.Next();
             k.m_result = new ConnectionSecureOrTune
             {
@@ -803,11 +820,7 @@ namespace RabbitMQ.Client.Impl
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
-        public void HandleConnectionStart(byte versionMajor,
-            byte versionMinor,
-            IDictionary<string, object> serverProperties,
-            byte[] mechanisms,
-            byte[] locales)
+        protected void HandleConnectionStart(in IncomingCommand cmd)
         {
             if (m_connectionStartCell is null)
             {
@@ -815,50 +828,51 @@ namespace RabbitMQ.Client.Impl
                     new ShutdownEventArgs(ShutdownInitiator.Library,
                         Constants.CommandInvalid,
                         "Unexpected Connection.Start");
-                ((Connection)Session.Connection).Close(reason);
+                Session.Connection.Close(reason);
             }
+
+            var method = new ConnectionStart(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             var details = new ConnectionStartDetails
             {
-                m_versionMajor = versionMajor,
-                m_versionMinor = versionMinor,
-                m_serverProperties = serverProperties,
-                m_mechanisms = mechanisms,
-                m_locales = locales
+                m_versionMajor = method._versionMajor,
+                m_versionMinor = method._versionMinor,
+                m_serverProperties = method._serverProperties,
+                m_mechanisms = method._mechanisms,
+                m_locales = method._locales
             };
             m_connectionStartCell.ContinueWithValue(details);
             m_connectionStartCell = null;
         }
 
-        ///<summary>Handle incoming Connection.Tune
-        ///methods.</summary>
-        public void HandleConnectionTune(ushort channelMax, uint frameMax, ushort heartbeatInSeconds)
+        protected void HandleConnectionTune(in IncomingCommand cmd)
         {
+            var connectionTune = new ConnectionTune(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             var k = (ConnectionStartRpcContinuation)_continuationQueue.Next();
             k.m_result = new ConnectionSecureOrTune
             {
                 m_tuneDetails =
                 {
-                    m_channelMax = channelMax,
-                    m_frameMax = frameMax,
-                    m_heartbeatInSeconds = heartbeatInSeconds
+                    m_channelMax = connectionTune._channelMax,
+                    m_frameMax = connectionTune._frameMax,
+                    m_heartbeatInSeconds = connectionTune._heartbeat
                 }
             };
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
-        public void HandleConnectionUnblocked()
+        protected void HandleConnectionUnblocked()
         {
-            var cb = (Connection)Session.Connection;
-
-            cb.HandleConnectionUnblocked();
+            Session.Connection.HandleConnectionUnblocked();
         }
 
-        public void HandleQueueDeclareOk(string queue,
-            uint messageCount,
-            uint consumerCount)
+        protected void HandleQueueDeclareOk(in IncomingCommand cmd)
         {
+            var method = new Client.Framing.Impl.QueueDeclareOk(cmd.MethodBytes.Span);
+            cmd.ReturnMethodBuffer();
             var k = (QueueDeclareRpcContinuation)_continuationQueue.Next();
-            k.m_result = new QueueDeclareOk(queue, messageCount, consumerCount);
+            k.m_result = new QueueDeclareOk(method._queue, method._messageCount, method._consumerCount);
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
@@ -899,7 +913,7 @@ namespace RabbitMQ.Client.Impl
 
         public abstract void _Private_ChannelFlowOk(bool active);
 
-        public abstract void _Private_ChannelOpen(string outOfBand);
+        public abstract void _Private_ChannelOpen();
 
         public abstract void _Private_ConfirmSelect(bool nowait);
 
@@ -1060,9 +1074,7 @@ namespace RabbitMQ.Client.Impl
             return k.m_result;
         }
 
-        public abstract void BasicNack(ulong deliveryTag,
-            bool multiple,
-            bool requeue);
+        public abstract void BasicNack(ulong deliveryTag, bool multiple, bool requeue);
 
         internal void AllocatePublishSeqNos(int count)
         {
@@ -1181,8 +1193,7 @@ namespace RabbitMQ.Client.Impl
 
         public abstract void BasicRecoverAsync(bool requeue);
 
-        public abstract void BasicReject(ulong deliveryTag,
-            bool requeue);
+        public abstract void BasicReject(ulong deliveryTag, bool requeue);
 
         public void Close()
         {
@@ -1433,7 +1444,7 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        internal void SendCommands(IList<OutgoingCommand> commands)
+        internal void SendCommands<T>(List<CommandParts<T>> commands) where T : struct, IOutgoingAmqpMethod
         {
             _flowControlBlock.Wait();
             AllocatePublishSeqNos(commands.Count);

@@ -37,22 +37,19 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ExchangeUnbind : MethodBase
+    internal readonly struct ExchangeUnbind : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _destination;
-        public string _source;
-        public string _routingKey;
-        public bool _nowait;
-        public IDictionary<string, object> _arguments;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _destination;
+        public readonly string _source;
+        public readonly string _routingKey;
+        public readonly bool _nowait;
+        public readonly IDictionary<string, object> _arguments;
 
-        public ExchangeUnbind()
+        public ExchangeUnbind(string Destination, string Source, string RoutingKey, bool Nowait, IDictionary<string, object> Arguments)
         {
-        }
-
-        public ExchangeUnbind(ushort Reserved1, string Destination, string Source, string RoutingKey, bool Nowait, IDictionary<string, object> Arguments)
-        {
-            _reserved1 = Reserved1;
             _destination = Destination;
             _source = Source;
             _routingKey = RoutingKey;
@@ -60,24 +57,11 @@ namespace RabbitMQ.Client.Framing.Impl
             _arguments = Arguments;
         }
 
-        public ExchangeUnbind(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _destination);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _source);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _routingKey);
-            offset += WireFormatting.ReadBits(span.Slice(offset), out _nowait);
-            WireFormatting.ReadDictionary(span.Slice(offset), out var tmpDictionary);
-            _arguments = tmpDictionary;
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ExchangeUnbind;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ExchangeUnbind;
-        public override string ProtocolMethodName => "exchange.unbind";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _destination);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _source);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _routingKey);
@@ -85,7 +69,7 @@ namespace RabbitMQ.Client.Framing.Impl
             return offset + WireFormatting.WriteTable(span.Slice(offset), _arguments);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1 + 1 + 1; // bytes for _reserved1, length of _destination, length of _source, length of _routingKey, bit fields
             bufferSize += WireFormatting.GetByteCount(_destination); // _destination in bytes

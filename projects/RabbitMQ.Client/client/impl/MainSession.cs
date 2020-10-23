@@ -45,16 +45,11 @@ namespace RabbitMQ.Client.Impl
     {
         private readonly object _closingLock = new object();
 
-        private readonly ProtocolCommandId _closeProtocolId;
-        private readonly ProtocolCommandId _closeOkProtocolId;
-
         private bool _closeServerInitiated;
         private bool _closing;
 
         public MainSession(Connection connection) : base(connection, 0)
         {
-            connection.Protocol.CreateConnectionClose(0, string.Empty, out OutgoingCommand request, out _closeOkProtocolId);
-            _closeProtocolId = request.Method.ProtocolCommandId;
         }
 
         public Action Handler { get; set; }
@@ -71,17 +66,16 @@ namespace RabbitMQ.Client.Impl
 
             if (!_closeServerInitiated && frame.Type == FrameType.FrameMethod)
             {
-                MethodBase method = Connection.Protocol.DecodeMethodFrom(frame.Payload.Span);
-                if (method.ProtocolCommandId == _closeProtocolId)
+                var commandId = Connection.Protocol.DecodeCommandIdFrom(frame.Payload.Span);
+                switch (commandId)
                 {
-                    return base.HandleFrame(in frame);
-                }
-
-                if (method.ProtocolCommandId == _closeOkProtocolId)
-                {
-                    // This is the reply (CloseOk) we were looking for
-                    // Call any listener attached to this session
-                    Handler();
+                    case ProtocolCommandId.ConnectionClose:
+                        return base.HandleFrame(in frame);
+                    case ProtocolCommandId.ConnectionCloseOk:
+                        // This is the reply (CloseOk) we were looking for
+                        // Call any listener attached to this session
+                        Handler();
+                        break;
                 }
             }
 
@@ -108,7 +102,7 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public override void Transmit(in OutgoingCommand cmd)
+        public override void Transmit<T>(in T cmd)
         {
             lock (_closingLock)
             {
@@ -121,9 +115,8 @@ namespace RabbitMQ.Client.Impl
 
             // Allow always for sending close ok
             // Or if application initiated, allow also for sending close
-            MethodBase method = cmd.Method;
-            if (method.ProtocolCommandId == _closeOkProtocolId ||
-                (!_closeServerInitiated && method.ProtocolCommandId == _closeProtocolId))
+            if (cmd.ProtocolCommandId == ProtocolCommandId.ConnectionCloseOk ||
+                (!_closeServerInitiated && cmd.ProtocolCommandId == ProtocolCommandId.ConnectionClose))
             {
                 base.Transmit(cmd);
             }

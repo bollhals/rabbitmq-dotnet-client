@@ -35,14 +35,10 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class BasicAck : Client.Impl.MethodBase
+    internal readonly struct BasicAck : IOutgoingAmqpMethod
     {
-        public ulong _deliveryTag;
-        public bool _multiple;
-
-        public BasicAck()
-        {
-        }
+        public readonly ulong _deliveryTag;
+        public readonly bool _multiple;
 
         public BasicAck(ulong DeliveryTag, bool Multiple)
         {
@@ -56,17 +52,15 @@ namespace RabbitMQ.Client.Framing.Impl
             WireFormatting.ReadBits(span.Slice(offset), out _multiple);
         }
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicAck;
-        public override string ProtocolMethodName => "basic.ack";
-        public override bool HasContent => false;
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicAck;
 
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
             int offset = WireFormatting.WriteLonglong(span, _deliveryTag);
             return offset + WireFormatting.WriteBits(span.Slice(offset), _multiple);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             return 8 + 1;
         }

@@ -30,44 +30,27 @@
 //---------------------------------------------------------------------------
 
 using System;
-using System.Text;
 using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ChannelOpen : Client.Impl.MethodBase
+    internal readonly struct ChannelOpen : IOutgoingAmqpMethod
     {
-        public string _reserved1;
+        /* unused, therefore commented out
+         * public readonly string _reserved1;
+         */
 
-        public ChannelOpen()
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ChannelOpen;
+
+        public int WriteArgumentsTo(Span<byte> span)
         {
+            return WireFormatting.WriteShortstr(span, "");
         }
 
-        public ChannelOpen(string Reserved1)
+        public int GetRequiredBufferSize()
         {
-            _reserved1 = Reserved1;
-        }
-
-        public ChannelOpen(ReadOnlySpan<byte> span)
-        {
-            WireFormatting.ReadShortstr(span, out _reserved1);
-        }
-
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ChannelOpen;
-        public override string ProtocolMethodName => "channel.open";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
-        {
-            return WireFormatting.WriteShortstr(span, _reserved1);
-        }
-
-        public override int GetRequiredBufferSize()
-        {
-            int bufferSize = 1; // bytes for length of _reserved1
-            bufferSize += WireFormatting.GetByteCount(_reserved1); // _reserved1 in bytes
-            return bufferSize;
+            return 1; // bytes for length of _reserved1
         }
     }
 }

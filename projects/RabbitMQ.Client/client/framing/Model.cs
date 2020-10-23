@@ -60,17 +60,17 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public override void _Private_BasicConsume(string queue, string consumerTag, bool noLocal, bool autoAck, bool exclusive, bool nowait, IDictionary<string, object> arguments)
         {
-            ModelSend(new BasicConsume(default, queue, consumerTag, noLocal, autoAck, exclusive, nowait, arguments));
+            ModelSend(new BasicConsume(queue, consumerTag, noLocal, autoAck, exclusive, nowait, arguments));
         }
 
         public override void _Private_BasicGet(string queue, bool autoAck)
         {
-            ModelSend(new BasicGet(default, queue, autoAck));
+            ModelSend(new BasicGet(queue, autoAck));
         }
 
         public override void _Private_BasicPublish(string exchange, string routingKey, bool mandatory, IBasicProperties basicProperties, ReadOnlyMemory<byte> body)
         {
-            ModelSend(new BasicPublish(default, exchange, routingKey, mandatory, default), (BasicProperties) basicProperties, body);
+            ModelSend(new BasicPublish(exchange, routingKey, mandatory, default), (BasicProperties) basicProperties, body);
         }
 
         public override void _Private_BasicPublishMemory(ReadOnlyMemory<byte> exchange, ReadOnlyMemory<byte> routingKey, bool mandatory, IBasicProperties basicProperties, ReadOnlyMemory<byte> body)
@@ -98,9 +98,9 @@ namespace RabbitMQ.Client.Framing.Impl
             ModelSend(new ChannelFlowOk(active));
         }
 
-        public override void _Private_ChannelOpen(string outOfBand)
+        public override void _Private_ChannelOpen()
         {
-            ModelRpc<ChannelOpenOk>(new ChannelOpen(outOfBand));
+            ModelRpc(new ChannelOpen(), ProtocolCommandId.ChannelOpenOk);
         }
 
         public override void _Private_ConfirmSelect(bool nowait)
@@ -112,13 +112,13 @@ namespace RabbitMQ.Client.Framing.Impl
             }
             else
             {
-                ModelRpc<ConfirmSelectOk>(method);
+                ModelRpc(method, ProtocolCommandId.ConfirmSelectOk);
             }
         }
 
         public override void _Private_ConnectionClose(ushort replyCode, string replyText, ushort classId, ushort methodId)
         {
-            ModelRpc<ConnectionCloseOk>(new ConnectionClose(replyCode, replyText, classId, methodId));
+            ModelRpc(new ConnectionClose(replyCode, replyText, classId, methodId), ProtocolCommandId.ConnectionCloseOk);
         }
 
         public override void _Private_ConnectionCloseOk()
@@ -143,77 +143,77 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public override void _Private_UpdateSecret(byte[] newSecret, string reason)
         {
-            ModelRpc<ConnectionUpdateSecretOk>(new ConnectionUpdateSecret(newSecret, reason));
+            ModelRpc(new ConnectionUpdateSecret(newSecret, reason), ProtocolCommandId.ConnectionUpdateSecretOk);
         }
 
         public override void _Private_ExchangeBind(string destination, string source, string routingKey, bool nowait, IDictionary<string, object> arguments)
         {
-            ExchangeBind method = new ExchangeBind(default, destination, source, routingKey, nowait, arguments);
+            ExchangeBind method = new ExchangeBind(destination, source, routingKey, nowait, arguments);
             if (nowait)
             {
                 ModelSend(method);
             }
             else
             {
-                ModelRpc<ExchangeBindOk>(method);
+                ModelRpc(method, ProtocolCommandId.ExchangeBindOk);
             }
         }
 
         public override void _Private_ExchangeDeclare(string exchange, string type, bool passive, bool durable, bool autoDelete, bool @internal, bool nowait, IDictionary<string, object> arguments)
         {
-            ExchangeDeclare method = new ExchangeDeclare(default, exchange, type, passive, durable, autoDelete, @internal, nowait, arguments);
+            ExchangeDeclare method = new ExchangeDeclare(exchange, type, passive, durable, autoDelete, @internal, nowait, arguments);
             if (nowait)
             {
                 ModelSend(method);
             }
             else
             {
-                ModelRpc<ExchangeDeclareOk>(method);
+                ModelRpc(method, ProtocolCommandId.ExchangeDeclareOk);
             }
         }
 
         public override void _Private_ExchangeDelete(string exchange, bool ifUnused, bool nowait)
         {
-            ExchangeDelete method = new ExchangeDelete(default, exchange, ifUnused, nowait);
+            ExchangeDelete method = new ExchangeDelete(exchange, ifUnused, nowait);
             if (nowait)
             {
                 ModelSend(method);
             }
             else
             {
-                ModelRpc<ExchangeDeleteOk>(method);
+                ModelRpc(method, ProtocolCommandId.ExchangeDeleteOk);
             }
         }
 
         public override void _Private_ExchangeUnbind(string destination, string source, string routingKey, bool nowait, IDictionary<string, object> arguments)
         {
-            ExchangeUnbind method = new ExchangeUnbind(default, destination, source, routingKey, nowait, arguments);
+            ExchangeUnbind method = new ExchangeUnbind(destination, source, routingKey, nowait, arguments);
             if (nowait)
             {
                 ModelSend(method);
             }
             else
             {
-                ModelRpc<ExchangeUnbindOk>(method);
+                ModelRpc(method, ProtocolCommandId.ExchangeUnbindOk);
             }
         }
 
         public override void _Private_QueueBind(string queue, string exchange, string routingKey, bool nowait, IDictionary<string, object> arguments)
         {
-            QueueBind method = new QueueBind(default, queue, exchange, routingKey, nowait, arguments);
+            QueueBind method = new QueueBind(queue, exchange, routingKey, nowait, arguments);
             if (nowait)
             {
                 ModelSend(method);
             }
             else
             {
-                ModelRpc<QueueBindOk>(method);
+                ModelRpc(method, ProtocolCommandId.QueueBindOk);
             }
         }
 
         public override void _Private_QueueDeclare(string queue, bool passive, bool durable, bool exclusive, bool autoDelete, bool nowait, IDictionary<string, object> arguments)
         {
-            QueueDeclare method = new QueueDeclare(default, queue, passive, durable, exclusive, autoDelete, nowait, arguments);
+            QueueDeclare method = new QueueDeclare(queue, passive, durable, exclusive, autoDelete, nowait, arguments);
             if (nowait)
             {
                 ModelSend(method);
@@ -226,26 +226,26 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public override uint _Private_QueueDelete(string queue, bool ifUnused, bool ifEmpty, bool nowait)
         {
-            QueueDelete method = new QueueDelete(default, queue, ifUnused, ifEmpty, nowait);
+            QueueDelete method = new QueueDelete(queue, ifUnused, ifEmpty, nowait);
             if (nowait)
             {
                 ModelSend(method);
                 return 0xFFFFFFFF;
             }
 
-            return ModelRpc<QueueDeleteOk>(method)._messageCount;
+            return ModelRpc(method, ProtocolCommandId.QueueDeleteOk, memory => new QueueDeleteOk(memory.Span))._messageCount;
         }
 
         public override uint _Private_QueuePurge(string queue, bool nowait)
         {
-            QueuePurge method = new QueuePurge(default, queue, nowait);
+            QueuePurge method = new QueuePurge(queue, nowait);
             if (nowait)
             {
                 ModelSend(method);
                 return 0xFFFFFFFF;
             }
 
-            return ModelRpc<QueuePurgeOk>(method)._messageCount;
+            return ModelRpc(method, ProtocolCommandId.QueuePurgeOk, memory => new QueuePurgeOk(memory.Span))._messageCount;
         }
 
         public override void BasicAck(ulong deliveryTag, bool multiple)
@@ -260,7 +260,7 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public override void BasicQos(uint prefetchSize, ushort prefetchCount, bool global)
         {
-            ModelRpc<BasicQosOk>(new BasicQos(prefetchSize, prefetchCount, global));
+            ModelRpc(new BasicQos(prefetchSize, prefetchCount, global), ProtocolCommandId.BasicQosOk);
         }
 
         public override void BasicRecoverAsync(bool requeue)
@@ -280,137 +280,124 @@ namespace RabbitMQ.Client.Framing.Impl
 
         public override void QueueUnbind(string queue, string exchange, string routingKey, IDictionary<string, object> arguments)
         {
-            ModelRpc<QueueUnbindOk>(new QueueUnbind(default, queue, exchange, routingKey, arguments));
+            ModelRpc(new QueueUnbind(queue, exchange, routingKey, arguments), ProtocolCommandId.QueueUnbindOk);
         }
 
         public override void TxCommit()
         {
-            ModelRpc<TxCommitOk>(new TxCommit());
+            ModelRpc(new TxCommit(), ProtocolCommandId.TxCommitOk);
         }
 
         public override void TxRollback()
         {
-            ModelRpc<TxRollbackOk>(new TxRollback());
+            ModelRpc(new TxRollback(), ProtocolCommandId.TxRollbackOk);
         }
 
         public override void TxSelect()
         {
-            ModelRpc<TxSelectOk>(new TxSelect());
+            ModelRpc(new TxSelect(), ProtocolCommandId.TxSelectOk);
         }
 
         public override bool DispatchAsynchronous(in IncomingCommand cmd)
         {
-            switch (cmd.Method.ProtocolCommandId)
+            switch (cmd.CommandId)
             {
                 case ProtocolCommandId.BasicDeliver:
                 {
-                    var __impl = (BasicDeliver)cmd.Method;
-                    HandleBasicDeliver(__impl._consumerTag, __impl._deliveryTag, __impl._redelivered, __impl._exchange, __impl._routingKey, (IBasicProperties) cmd.Header, cmd.Body, cmd.TakeoverPayload());
+                    HandleBasicDeliver(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicAck:
                 {
-                    var __impl = (BasicAck)cmd.Method;
-                    HandleBasicAck(__impl._deliveryTag, __impl._multiple);
+                    HandleBasicAck(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicCancel:
                 {
-                    var __impl = (BasicCancel)cmd.Method;
-                    HandleBasicCancel(__impl._consumerTag, __impl._nowait);
+                    HandleBasicCancel(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicCancelOk:
                 {
-                    var __impl = (BasicCancelOk)cmd.Method;
-                    HandleBasicCancelOk(__impl._consumerTag);
+                    HandleBasicCancelOk(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicConsumeOk:
                 {
-                    var __impl = (BasicConsumeOk)cmd.Method;
-                    HandleBasicConsumeOk(__impl._consumerTag);
+                    HandleBasicConsumeOk(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicGetEmpty:
                 {
+                    cmd.ReturnMethodBuffer();
                     HandleBasicGetEmpty();
                     return true;
                 }
                 case ProtocolCommandId.BasicGetOk:
                 {
-                    var __impl = (BasicGetOk)cmd.Method;
-                    HandleBasicGetOk(__impl._deliveryTag, __impl._redelivered, __impl._exchange, __impl._routingKey, __impl._messageCount, (IBasicProperties) cmd.Header, cmd.Body, cmd.TakeoverPayload());
+                    HandleBasicGetOk(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicNack:
                 {
-                    var __impl = (BasicNack)cmd.Method;
-                    HandleBasicNack(__impl._deliveryTag, __impl._multiple, __impl._requeue);
+                    HandleBasicNack(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.BasicRecoverOk:
                 {
+                    cmd.ReturnMethodBuffer();
                     HandleBasicRecoverOk();
                     return true;
                 }
                 case ProtocolCommandId.BasicReturn:
                 {
-                    var __impl = (BasicReturn)cmd.Method;
-                    HandleBasicReturn(__impl._replyCode, __impl._replyText, __impl._exchange, __impl._routingKey, (IBasicProperties) cmd.Header, cmd.Body, cmd.TakeoverPayload());
+                    HandleBasicReturn(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ChannelClose:
                 {
-                    var __impl = (ChannelClose)cmd.Method;
-                    HandleChannelClose(__impl._replyCode, __impl._replyText, __impl._classId, __impl._methodId);
+                    HandleChannelClose(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ChannelCloseOk:
                 {
+                    cmd.ReturnMethodBuffer();
                     HandleChannelCloseOk();
                     return true;
                 }
                 case ProtocolCommandId.ChannelFlow:
                 {
-                    var __impl = (ChannelFlow)cmd.Method;
-                    HandleChannelFlow(__impl._active);
+                    HandleChannelFlow(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionBlocked:
                 {
-                    var __impl = (ConnectionBlocked)cmd.Method;
-                    HandleConnectionBlocked(__impl._reason);
+                    HandleConnectionBlocked(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionClose:
                 {
-                    var __impl = (ConnectionClose)cmd.Method;
-                    HandleConnectionClose(__impl._replyCode, __impl._replyText, __impl._classId, __impl._methodId);
+                    HandleConnectionClose(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionOpenOk:
                 {
-                    var __impl = (ConnectionOpenOk)cmd.Method;
-                    HandleConnectionOpenOk(__impl._reserved1);
+                    HandleConnectionOpenOk(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionSecure:
                 {
-                    var __impl = (ConnectionSecure)cmd.Method;
-                    HandleConnectionSecure(__impl._challenge);
+                    HandleConnectionSecure(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionStart:
                 {
-                    var __impl = (ConnectionStart)cmd.Method;
-                    HandleConnectionStart(__impl._versionMajor, __impl._versionMinor, __impl._serverProperties, __impl._mechanisms, __impl._locales);
+                    HandleConnectionStart(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionTune:
                 {
-                    var __impl = (ConnectionTune)cmd.Method;
-                    HandleConnectionTune(__impl._channelMax, __impl._frameMax, __impl._heartbeat);
+                    HandleConnectionTune(in cmd);
                     return true;
                 }
                 case ProtocolCommandId.ConnectionUnblocked:
@@ -420,8 +407,7 @@ namespace RabbitMQ.Client.Framing.Impl
                 }
                 case ProtocolCommandId.QueueDeclareOk:
                 {
-                    var __impl = (QueueDeclareOk)cmd.Method;
-                    HandleQueueDeclareOk(__impl._queue, __impl._messageCount, __impl._consumerCount);
+                    HandleQueueDeclareOk(in cmd);
                     return true;
                 }
                 default: return false;

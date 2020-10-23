@@ -37,25 +37,22 @@ using RabbitMQ.Client.Impl;
 
 namespace RabbitMQ.Client.Framing.Impl
 {
-    internal sealed class ExchangeDeclare : MethodBase
+    internal readonly struct ExchangeDeclare : IOutgoingAmqpMethod
     {
-        public ushort _reserved1;
-        public string _exchange;
-        public string _type;
-        public bool _passive;
-        public bool _durable;
-        public bool _autoDelete;
-        public bool _internal;
-        public bool _nowait;
-        public IDictionary<string, object> _arguments;
+        /* unused, therefore commented out
+         * public readonly ushort _reserved1;
+         */
+        public readonly string _exchange;
+        public readonly string _type;
+        public readonly bool _passive;
+        public readonly bool _durable;
+        public readonly bool _autoDelete;
+        public readonly bool _internal;
+        public readonly bool _nowait;
+        public readonly IDictionary<string, object> _arguments;
 
-        public ExchangeDeclare()
+        public ExchangeDeclare(string Exchange, string Type, bool Passive, bool Durable, bool AutoDelete, bool Internal, bool Nowait, IDictionary<string, object> Arguments)
         {
-        }
-
-        public ExchangeDeclare(ushort Reserved1, string Exchange, string Type, bool Passive, bool Durable, bool AutoDelete, bool Internal, bool Nowait, IDictionary<string, object> Arguments)
-        {
-            _reserved1 = Reserved1;
             _exchange = Exchange;
             _type = Type;
             _passive = Passive;
@@ -66,30 +63,18 @@ namespace RabbitMQ.Client.Framing.Impl
             _arguments = Arguments;
         }
 
-        public ExchangeDeclare(ReadOnlySpan<byte> span)
-        {
-            int offset = WireFormatting.ReadShort(span, out _reserved1);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _exchange);
-            offset += WireFormatting.ReadShortstr(span.Slice(offset), out _type);
-            offset += WireFormatting.ReadBits(span.Slice(offset), out _passive, out _durable, out _autoDelete, out _internal, out _nowait);
-            WireFormatting.ReadDictionary(span.Slice(offset), out var tmpDictionary);
-            _arguments = tmpDictionary;
-        }
+        public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ExchangeDeclare;
 
-        public override ProtocolCommandId ProtocolCommandId => ProtocolCommandId.ExchangeDeclare;
-        public override string ProtocolMethodName => "exchange.declare";
-        public override bool HasContent => false;
-
-        public override int WriteArgumentsTo(Span<byte> span)
+        public int WriteArgumentsTo(Span<byte> span)
         {
-            int offset = WireFormatting.WriteShort(span, _reserved1);
+            int offset = WireFormatting.WriteShort(span, 0);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _exchange);
             offset += WireFormatting.WriteShortstr(span.Slice(offset), _type);
             offset += WireFormatting.WriteBits(span.Slice(offset), _passive, _durable, _autoDelete, _internal, _nowait);
             return offset + WireFormatting.WriteTable(span.Slice(offset), _arguments);
         }
 
-        public override int GetRequiredBufferSize()
+        public int GetRequiredBufferSize()
         {
             int bufferSize = 2 + 1 + 1 + 1; // bytes for _reserved1, length of _exchange, length of _type, bit fields
             bufferSize += WireFormatting.GetByteCount(_exchange); // _exchange in bytes

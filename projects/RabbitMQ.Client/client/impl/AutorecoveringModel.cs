@@ -32,7 +32,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Xml.Schema;
 
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Framing.Impl;
@@ -301,177 +300,6 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        public void ConnectionTuneOk(ushort channelMax,
-            uint frameMax,
-            ushort heartbeat)
-        {
-            ThrowIfDisposed();
-            _delegate.ConnectionTuneOk(channelMax, frameMax, heartbeat);
-        }
-
-        public void HandleBasicAck(ulong deliveryTag, bool multiple)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicAck(deliveryTag, multiple);
-        }
-
-        public void HandleBasicCancel(string consumerTag, bool nowait)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicCancel(consumerTag, nowait);
-        }
-
-        public void HandleBasicCancelOk(string consumerTag)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicCancelOk(consumerTag);
-        }
-
-        public void HandleBasicConsumeOk(string consumerTag)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicConsumeOk(consumerTag);
-        }
-
-        public void HandleBasicDeliver(string consumerTag,
-            ulong deliveryTag,
-            bool redelivered,
-            string exchange,
-            string routingKey,
-            IBasicProperties basicProperties,
-            ReadOnlyMemory<byte> body,
-            byte[] rentedArray)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicDeliver(consumerTag, deliveryTag, redelivered, exchange, routingKey, basicProperties, body, rentedArray);
-        }
-
-        public void HandleBasicGetEmpty()
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicGetEmpty();
-        }
-
-        public void HandleBasicGetOk(ulong deliveryTag,
-            bool redelivered,
-            string exchange,
-            string routingKey,
-            uint messageCount,
-            IBasicProperties basicProperties,
-            ReadOnlyMemory<byte> body,
-            byte[] rentedArray)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicGetOk(deliveryTag, redelivered, exchange, routingKey, messageCount, basicProperties, body, rentedArray);
-        }
-
-        public void HandleBasicNack(ulong deliveryTag,
-            bool multiple,
-            bool requeue)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicNack(deliveryTag, multiple, requeue);
-        }
-
-        public void HandleBasicRecoverOk()
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicRecoverOk();
-        }
-
-        public void HandleBasicReturn(ushort replyCode,
-            string replyText,
-            string exchange,
-            string routingKey,
-            IBasicProperties basicProperties,
-            ReadOnlyMemory<byte> body,
-            byte[] rentedArray)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleBasicReturn(replyCode, replyText, exchange, routingKey, basicProperties, body, rentedArray);
-        }
-
-        public void HandleChannelClose(ushort replyCode,
-            string replyText,
-            ushort classId,
-            ushort methodId)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleChannelClose(replyCode, replyText, classId, methodId);
-        }
-
-        public void HandleChannelCloseOk()
-        {
-            ThrowIfDisposed();
-            _delegate.HandleChannelCloseOk();
-        }
-
-        public void HandleChannelFlow(bool active)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleChannelFlow(active);
-        }
-
-        public void HandleConnectionBlocked(string reason)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionBlocked(reason);
-        }
-
-        public void HandleConnectionClose(ushort replyCode,
-            string replyText,
-            ushort classId,
-            ushort methodId)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionClose(replyCode, replyText, classId, methodId);
-        }
-
-        public void HandleConnectionOpenOk(string knownHosts)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionOpenOk(knownHosts);
-        }
-
-        public void HandleConnectionSecure(byte[] challenge)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionSecure(challenge);
-        }
-
-        public void HandleConnectionStart(byte versionMajor,
-            byte versionMinor,
-            IDictionary<string, object> serverProperties,
-            byte[] mechanisms,
-            byte[] locales)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionStart(versionMajor, versionMinor, serverProperties,
-                mechanisms, locales);
-        }
-
-        public void HandleConnectionTune(ushort channelMax,
-            uint frameMax,
-            ushort heartbeat)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionTune(channelMax, frameMax, heartbeat);
-        }
-
-        public void HandleConnectionUnblocked()
-        {
-            ThrowIfDisposed();
-            _delegate.HandleConnectionUnblocked();
-        }
-
-        public void HandleQueueDeclareOk(string queue,
-            uint messageCount,
-            uint consumerCount)
-        {
-            ThrowIfDisposed();
-            _delegate.HandleQueueDeclareOk(queue, messageCount, consumerCount);
-        }
-
         public void _Private_BasicCancel(string consumerTag,
             bool nowait)
         {
@@ -547,10 +375,10 @@ namespace RabbitMQ.Client.Impl
             _delegate._Private_ChannelFlowOk(active);
         }
 
-        public void _Private_ChannelOpen(string outOfBand)
+        public void _Private_ChannelOpen()
         {
             ThrowIfDisposed();
-            _delegate._Private_ChannelOpen(outOfBand);
+            _delegate._Private_ChannelOpen();
         }
 
         public void _Private_ConfirmSelect(bool nowait)

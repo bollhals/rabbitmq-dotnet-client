@@ -36,6 +36,7 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using RabbitMQ.Client.Exceptions;
+using RabbitMQ.Client.Framing.Impl;
 using RabbitMQ.Util;
 
 namespace RabbitMQ.Client.Impl
@@ -47,7 +48,7 @@ namespace RabbitMQ.Client.Impl
          * +------------+---------+----------------+---------+------------------+
          * | 1 byte     | 2 bytes | 4 bytes        | x bytes | 1 byte           |
          * +------------+---------+----------------+---------+------------------+ */
-        private const int BaseFrameSize = 1 + 2 + 4 + 1;
+        public const int BaseFrameSize = 1 + 2 + 4 + 1;
         private const int StartPayload = 7;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -75,7 +76,7 @@ namespace RabbitMQ.Client.Impl
              * +----------+-----------+-----------+ */
             public const int FrameSize = BaseFrameSize + 2 + 2;
 
-            public static int WriteTo(Span<byte> span, ushort channel, MethodBase method)
+            public static int WriteTo<T>(Span<byte> span, ushort channel, in T method) where T : struct, IOutgoingAmqpMethod
             {
                 const int StartClassId = StartPayload;
                 const int StartMethodArguments = StartPayload + 4;
@@ -151,6 +152,57 @@ namespace RabbitMQ.Client.Impl
                 Payload.CopyTo(buffer);
                 return new Memory<byte>(buffer, 0, FrameSize);
             }
+        }
+
+        public static ReadOnlyMemory<byte> SerializeToFrames<T>(in T method, ushort channelNumber) where T : struct, IOutgoingAmqpMethod
+        {
+            var size = Method.FrameSize + method.GetRequiredBufferSize();
+            var array = ArrayPool<byte>.Shared.Rent(size);
+            var offset = Method.WriteTo(array, channelNumber, method);
+
+            if (offset != size)
+            {
+                throw new InvalidOperationException($"Serialized to wrong size, expect {size}, offset {offset}");
+            }
+
+            return new ReadOnlyMemory<byte>(array, 0, size);
+        }
+
+        public static ReadOnlyMemory<byte> SerializeToFrames<T>(in T method, ContentHeaderBase header, ReadOnlyMemory<byte> body, ushort channelNumber, int maxBodyPayloadBytes) where T : struct, IOutgoingAmqpMethod
+        {
+            int remainingBodyBytes = body.Length;
+            int size = Method.FrameSize + Header.FrameSize +
+                       method.GetRequiredBufferSize() + header.GetRequiredPayloadBufferSize() +
+                       BodySegment.FrameSize * GetBodyFrameCount(maxBodyPayloadBytes, remainingBodyBytes) + remainingBodyBytes;
+            var array = ArrayPool<byte>.Shared.Rent(size);
+
+            var offset = Method.WriteTo(array, channelNumber, method);
+            offset += Header.WriteTo(array.AsSpan(offset), channelNumber, header, remainingBodyBytes);
+            var bodySpan = body.Span;
+            while (remainingBodyBytes > 0)
+            {
+                int frameSize = remainingBodyBytes > maxBodyPayloadBytes ? maxBodyPayloadBytes : remainingBodyBytes;
+                offset += BodySegment.WriteTo(array.AsSpan(offset), channelNumber, bodySpan.Slice(bodySpan.Length - remainingBodyBytes, frameSize));
+                remainingBodyBytes -= frameSize;
+            }
+
+            if (offset != size)
+            {
+                throw new InvalidOperationException($"Serialized to wrong size, expect {size}, offset {offset}");
+            }
+
+            return new ReadOnlyMemory<byte>(array, 0, size);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetBodyFrameCount(int maxPayloadBytes, int length)
+        {
+            if (maxPayloadBytes == int.MaxValue)
+            {
+                return 1;
+            }
+
+            return (length + maxPayloadBytes - 1) / maxPayloadBytes;
         }
     }
 
