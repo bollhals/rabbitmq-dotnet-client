@@ -31,6 +31,7 @@
 
 using System;
 using System.Buffers;
+using RabbitMQ.Client.Framing;
 using RabbitMQ.Client.Framing.Impl;
 
 namespace RabbitMQ.Client.Impl
@@ -45,7 +46,8 @@ namespace RabbitMQ.Client.Impl
         private const int EmptyFrameSize = 8;
 
         public readonly MethodBase Method;
-        private readonly ContentHeaderBase _header;
+        private readonly BasicProperties _header;
+        private readonly MessageProperties _properties;
         private readonly ReadOnlyMemory<byte> _body;
 
         public OutgoingCommand(MethodBase method)
@@ -53,10 +55,19 @@ namespace RabbitMQ.Client.Impl
         {
         }
 
-        public OutgoingCommand(MethodBase method, ContentHeaderBase header, ReadOnlyMemory<byte> body)
+        public OutgoingCommand(MethodBase method, BasicProperties header, ReadOnlyMemory<byte> body)
         {
             Method = method;
             _header = header;
+            _properties = default;
+            _body = body;
+        }
+
+        public OutgoingCommand(MethodBase method, in MessageProperties properties, ReadOnlyMemory<byte> body)
+        {
+            Method = method;
+            _properties = properties;
+            _header = null!;
             _body = body;
         }
 
@@ -73,7 +84,14 @@ namespace RabbitMQ.Client.Impl
             if (Method.HasContent)
             {
                 int remainingBodyBytes = _body.Length;
-                offset += Framing.Header.WriteTo(span.Slice(offset), channelNumber, _header, remainingBodyBytes);
+                if (_header is null)
+                {
+                    offset += Framing.Header.WriteTo(span.Slice(offset), channelNumber, _properties, remainingBodyBytes);
+                }
+                else
+                {
+                    offset += Framing.Header.WriteTo(span.Slice(offset), channelNumber, _header, remainingBodyBytes);
+                }
                 ReadOnlySpan<byte> bodySpan = _body.Span;
                 while (remainingBodyBytes > 0)
                 {
@@ -99,7 +117,7 @@ namespace RabbitMQ.Client.Impl
             }
 
             return Framing.Method.FrameSize + Method.GetRequiredBufferSize() +
-                   Framing.Header.FrameSize + _header.GetRequiredPayloadBufferSize() +
+                   Framing.Header.FrameSize + (_header?.GetRequiredPayloadBufferSize() ?? _properties.GetRequiredPayloadBufferSize()) +
                    Framing.BodySegment.FrameSize * GetBodyFrameCount(maxPayloadBytes) + _body.Length;
         }
 

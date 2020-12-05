@@ -49,7 +49,7 @@ namespace RabbitMQ.Client.client.impl.Channel
                 _mandatory = mandatory
             };
 
-            _commands.Add(new OutgoingCommand(method, (ContentHeaderBase?)basicProperties ?? Channel.EmptyBasicProperties, body));
+            _commands.Add(new OutgoingCommand(method, (BasicProperties?)basicProperties ?? Channel.EmptyBasicProperties, body));
         }
     }
 }

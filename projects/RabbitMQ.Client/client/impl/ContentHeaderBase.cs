@@ -50,7 +50,7 @@ namespace RabbitMQ.Client.Impl
             throw new NotImplementedException();
         }
 
-        internal abstract int WritePropertiesTo(Span<byte> span);
+        public abstract int WritePropertiesTo(Span<byte> span);
 
         public abstract int GetRequiredPayloadBufferSize();
     }

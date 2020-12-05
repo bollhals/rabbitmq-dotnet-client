@@ -36,6 +36,7 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using RabbitMQ.Client.Exceptions;
+using RabbitMQ.Client.Framing;
 using RabbitMQ.Util;
 
 namespace RabbitMQ.Client.Impl
@@ -95,7 +96,8 @@ namespace RabbitMQ.Client.Impl
              * +----------+----------+-------------------+-----------+ */
             public const int FrameSize = BaseFrameSize + 2 + 2 + 8;
 
-            public static int WriteTo(Span<byte> span, ushort channel, ContentHeaderBase header, int bodyLength)
+            public static int WriteTo<T>(Span<byte> span, ushort channel, T header, int bodyLength)
+                where T : IBasicProperties, ISpanWriteable
             {
                 const int StartClassId = StartPayload;
                 const int StartWeight = StartPayload + 2;

@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using RabbitMQ.Client.Exceptions;
+using RabbitMQ.Client.Framing;
 using RabbitMQ.Client.Impl;
+using BasicProperties = RabbitMQ.Client.Framing.BasicProperties;
 
 namespace RabbitMQ.Client.client.impl.Channel
 {
@@ -126,7 +128,7 @@ namespace RabbitMQ.Client.client.impl.Channel
             ModelSend(method, null, ReadOnlyMemory<byte>.Empty);
         }
 
-        private protected void ModelSend(MethodBase method, ContentHeaderBase? header, ReadOnlyMemory<byte> body)
+        private protected void ModelSend(MethodBase method, RabbitMQ.Client.Impl.BasicProperties? header, ReadOnlyMemory<byte> body)
         {
             if (method.HasContent)
             {
@@ -136,6 +138,19 @@ namespace RabbitMQ.Client.client.impl.Channel
             else
             {
                 Session.Transmit(new OutgoingCommand(method, header, body));
+            }
+        }
+
+        private protected void ModelSend(MethodBase method, in MessageProperties properties, ReadOnlyMemory<byte> body)
+        {
+            if (method.HasContent)
+            {
+                _flowControlBlock.Wait();
+                Session.Transmit(new OutgoingCommand(method, properties, body));
+            }
+            else
+            {
+                Session.Transmit(new OutgoingCommand(method, properties, body));
             }
         }
 

@@ -29,11 +29,13 @@
 //  Copyright (c) 2007-2020 VMware, Inc.  All rights reserved.
 //---------------------------------------------------------------------------
 
+using System;
 using System.Collections.Generic;
+using RabbitMQ.Client.Framing;
 
 namespace RabbitMQ.Client.Impl
 {
-    public abstract class BasicProperties : ContentHeaderBase, IBasicProperties
+    public abstract class BasicProperties : ContentHeaderBase, IBasicProperties, ISpanWriteable
     {
         /// <summary>
         /// Application Id.

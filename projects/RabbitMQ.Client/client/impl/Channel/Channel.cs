@@ -7,12 +7,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Exceptions;
+using RabbitMQ.Client.Framing;
 using RabbitMQ.Client.Framing.Impl;
 using RabbitMQ.Client.Impl;
 using BasicCancel = RabbitMQ.Client.Framing.Impl.BasicCancel;
 using BasicCancelOk = RabbitMQ.Client.Framing.Impl.BasicCancelOk;
 using BasicConsumeOk = RabbitMQ.Client.Framing.Impl.BasicConsumeOk;
 using BasicDeliver = RabbitMQ.Client.Framing.Impl.BasicDeliver;
+using BasicProperties = RabbitMQ.Client.Impl.BasicProperties;
 
 namespace RabbitMQ.Client.client.impl.Channel
 {
@@ -339,7 +341,19 @@ namespace RabbitMQ.Client.client.impl.Channel
             }
 
             basicProperties ??= EmptyBasicProperties;
-            ModelSend(new BasicPublish(default, exchange, routingKey, mandatory, default), (BasicProperties) basicProperties, body);
+            ModelSend(new BasicPublish(default, exchange, routingKey, mandatory, default), (BasicProperties?) basicProperties, body);
+            return default;
+        }
+
+        /// <inheritdoc />
+        public ValueTask PublishMessageAsync(string exchange, string routingKey, in MessageProperties properties, ReadOnlyMemory<byte> body, bool mandatory = false)
+        {
+            if (IsPublishAcksEnabled)
+            {
+                AllocatePublishTagUsed();
+            }
+
+            ModelSend(new BasicPublish(default, exchange, routingKey, mandatory, default), properties, body);
             return default;
         }
 
