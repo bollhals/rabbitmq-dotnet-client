@@ -30,7 +30,6 @@
 //---------------------------------------------------------------------------
 
 using System;
-using System.Text;
 using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Impl;
 
@@ -39,18 +38,21 @@ namespace RabbitMQ.Client.Framing.Impl
     internal readonly struct BasicCancel : IOutgoingAmqpMethod
     {
         public readonly string _consumerTag;
+        public readonly CachedString _cachedConsumerTag;
         public readonly bool _nowait;
 
         public BasicCancel(string ConsumerTag, bool Nowait)
         {
             _consumerTag = ConsumerTag;
+            _cachedConsumerTag = default;
             _nowait = Nowait;
         }
 
-        public BasicCancel(ReadOnlySpan<byte> span)
+        public BasicCancel(ReadOnlyMemory<byte> memory)
         {
-            int offset = WireFormatting.ReadShortstr(span, out _consumerTag);
-            WireFormatting.ReadBits(span.Slice(offset), out _nowait);
+            _consumerTag = default;
+            int offset = WireFormatting.ReadAndRemoveCachedShortstr(memory, out _cachedConsumerTag);
+            WireFormatting.ReadBits(memory.Span.Slice(offset), out _nowait);
         }
 
         public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicCancel;

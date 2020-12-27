@@ -187,6 +187,34 @@ namespace RabbitMQ.Client.Impl
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int ReadCachedShortstr(ReadOnlyMemory<byte> memory, out CachedString value)
+        {
+            int byteCount = memory.Span[0];
+            if (byteCount == 0)
+            {
+                value = CachedString.Empty;
+                return 1;
+            }
+
+            value = CachedString.FromCache(memory.Slice(1, byteCount));
+            return 1 + byteCount;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int ReadAndRemoveCachedShortstr(ReadOnlyMemory<byte> memory, out CachedString value)
+        {
+            int byteCount = memory.Span[0];
+            if (byteCount == 0)
+            {
+                value = CachedString.Empty;
+                return 1;
+            }
+
+            value = CachedString.GetAndRemoveFromCache(memory.Slice(1, byteCount));
+            return 1 + byteCount;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int ReadShortstr(ReadOnlySpan<byte> span, out string value)
         {
             int byteCount = span[0];

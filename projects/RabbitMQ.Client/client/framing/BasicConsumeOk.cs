@@ -37,11 +37,11 @@ namespace RabbitMQ.Client.Framing.Impl
 {
     internal readonly struct BasicConsumeOk : IAmqpMethod
     {
-        public readonly string _consumerTag;
+        public readonly CachedString _consumerTag;
 
-        public BasicConsumeOk(ReadOnlySpan<byte> span)
+        public BasicConsumeOk(ReadOnlyMemory<byte> memory)
         {
-            WireFormatting.ReadShortstr(span, out _consumerTag);
+            WireFormatting.ReadCachedShortstr(memory, out _consumerTag);
         }
 
         public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicConsumeOk;

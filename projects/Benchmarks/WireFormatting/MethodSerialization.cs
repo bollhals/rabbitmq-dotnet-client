@@ -31,10 +31,6 @@ namespace RabbitMQ.Benchmarks
 
     public class MethodBasicDeliver : MethodSerializationBase
     {
-        private const string StringValue = "Exchange_OR_RoutingKey";
-        private readonly BasicPublish _basicPublish = new BasicPublish(StringValue, StringValue, false, false);
-        private readonly BasicPublishMemory _basicPublishMemory = new BasicPublishMemory(Encoding.UTF8.GetBytes(StringValue), Encoding.UTF8.GetBytes(StringValue), false, false);
-
         public override void SetUp()
         {
             int offset = RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Span, string.Empty);
@@ -44,8 +40,41 @@ namespace RabbitMQ.Benchmarks
             RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Slice(offset).Span, string.Empty);
         }
 
+        [GlobalSetup(Target = nameof(BasicDeliverReadSmall))]
+        public void SetUpPopulated()
+        {
+            int offset = RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Span, "My-default-consumer-tag");
+            offset += RabbitMQ.Client.Impl.WireFormatting.WriteLonglong(_buffer.Slice(offset).Span, 0);
+            offset += RabbitMQ.Client.Impl.WireFormatting.WriteBits(_buffer.Slice(offset).Span, false);
+            offset += RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Slice(offset).Span, "My-default-exchange-name");
+            RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Slice(offset).Span, "My-default-routing-key");
+        }
+
+        [GlobalSetup(Target = nameof(BasicDeliverReadMax))]
+        public void SetUpMax()
+        {
+            int offset = RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Span, new string('c', 255));
+            offset += RabbitMQ.Client.Impl.WireFormatting.WriteLonglong(_buffer.Slice(offset).Span, 0);
+            offset += RabbitMQ.Client.Impl.WireFormatting.WriteBits(_buffer.Slice(offset).Span, false);
+            offset += RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Slice(offset).Span, new string('e', 255));
+            RabbitMQ.Client.Impl.WireFormatting.WriteShortstr(_buffer.Slice(offset).Span, new string('r', 255));
+        }
+
         [Benchmark]
-        public object BasicDeliverRead() => new BasicDeliver(_buffer.Span)._consumerTag; // return one property to not box when returning an object instead
+        public object BasicDeliverReadEmpty() => new BasicDeliver(_buffer)._consumerTag; // return one property to not box when returning an object instead
+
+        [Benchmark]
+        public object BasicDeliverReadSmall() => new BasicDeliver(_buffer)._consumerTag; // return one property to not box when returning an object instead
+
+        [Benchmark]
+        public object BasicDeliverReadMax() => new BasicDeliver(_buffer)._consumerTag; // return one property to not box when returning an object instead
+    }
+
+    public class MethodBasicPublishDeliver : MethodSerializationBase
+    {
+        private const string StringValue = "Exchange_OR_RoutingKey";
+        private readonly BasicPublish _basicPublish = new BasicPublish(StringValue, StringValue, false, false);
+        private readonly BasicPublishMemory _basicPublishMemory = new BasicPublishMemory(Encoding.UTF8.GetBytes(StringValue), Encoding.UTF8.GetBytes(StringValue), false, false);
 
         [Benchmark]
         public int BasicPublishWrite() => _basicPublish.WriteArgumentsTo(_buffer.Span);

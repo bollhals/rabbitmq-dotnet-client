@@ -589,7 +589,7 @@ namespace RabbitMQ.Client.Impl
 
         protected void HandleBasicCancel(in IncomingCommand cmd)
         {
-            var consumerTag = new Client.Framing.Impl.BasicCancel(cmd.MethodBytes.Span)._consumerTag;
+            var consumerTag = new Client.Framing.Impl.BasicCancel(cmd.MethodBytes)._cachedConsumerTag.Value;
             cmd.ReturnMethodBuffer();
             IBasicConsumer consumer;
             lock (_consumers)
@@ -597,16 +597,12 @@ namespace RabbitMQ.Client.Impl
                 consumer = _consumers[consumerTag];
                 _consumers.Remove(consumerTag);
             }
-            if (consumer is null)
-            {
-                consumer = DefaultConsumer;
-            }
-            ConsumerDispatcher.HandleBasicCancel(consumer, consumerTag);
+            ConsumerDispatcher.HandleBasicCancel(consumer ?? DefaultConsumer, consumerTag);
         }
 
         protected void HandleBasicCancelOk(in IncomingCommand cmd)
         {
-            var consumerTag = new Client.Framing.Impl.BasicCancelOk(cmd.MethodBytes.Span)._consumerTag;
+            var consumerTag = new Client.Framing.Impl.BasicCancelOk(cmd.MethodBytes)._consumerTag.Value;
             cmd.ReturnMethodBuffer();
             var k = (BasicConsumerRpcContinuation)_continuationQueue.Next();
             lock (_consumers)
@@ -620,26 +616,26 @@ namespace RabbitMQ.Client.Impl
 
         protected void HandleBasicConsumeOk(in IncomingCommand cmd)
         {
-            var consumerTag = new Client.Framing.Impl.BasicConsumeOk(cmd.MethodBytes.Span)._consumerTag;
+            var consumerTag = new Client.Framing.Impl.BasicConsumeOk(cmd.MethodBytes)._consumerTag;
             cmd.ReturnMethodBuffer();
             var k = (BasicConsumerRpcContinuation)_continuationQueue.Next();
-            k.m_consumerTag = consumerTag;
+            k.m_consumerTag = consumerTag.Value;
             lock (_consumers)
             {
-                _consumers[consumerTag] = k.m_consumer;
+                _consumers[consumerTag.Value] = k.m_consumer;
             }
-            ConsumerDispatcher.HandleBasicConsumeOk(k.m_consumer, consumerTag);
+            ConsumerDispatcher.HandleBasicConsumeOk(k.m_consumer, consumerTag.Value);
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 
         protected void HandleBasicDeliver(in IncomingCommand cmd)
         {
-            var method = new Client.Framing.Impl.BasicDeliver(cmd.MethodBytes.Span);
+            var method = new Client.Framing.Impl.BasicDeliver(cmd.MethodBytes);
             cmd.ReturnMethodBuffer();
             IBasicConsumer consumer;
             lock (_consumers)
             {
-                consumer = _consumers[method._consumerTag];
+                consumer = _consumers[method._consumerTag.Value];
             }
             if (consumer is null)
             {
@@ -654,11 +650,11 @@ namespace RabbitMQ.Client.Impl
             }
 
             ConsumerDispatcher.HandleBasicDeliver(consumer,
-                    method._consumerTag,
+                    method._consumerTag.Value,
                     AdjustDeliveryTag(method._deliveryTag),
                     method._redelivered,
-                    method._exchange,
-                    method._routingKey,
+                    method._exchange.Value,
+                    method._routingKey.Value,
                     (IBasicProperties)cmd.Header,
                     cmd.Body,
                     cmd.TakeoverPayload());
@@ -666,14 +662,14 @@ namespace RabbitMQ.Client.Impl
 
         protected void HandleBasicGetOk(in IncomingCommand cmd)
         {
-            var method = new BasicGetOk(cmd.MethodBytes.Span);
+            var method = new BasicGetOk(cmd.MethodBytes);
             cmd.ReturnMethodBuffer();
             var k = (BasicGetRpcContinuation)_continuationQueue.Next();
             k.m_result = new BasicGetResult(
                 AdjustDeliveryTag(method._deliveryTag),
                 method._redelivered,
-                method._exchange,
-                method._routingKey,
+                method._exchange.Value,
+                method._routingKey.Value,
                 method._messageCount,
                 (IBasicProperties)cmd.Header,
                 cmd.Body,
@@ -704,13 +700,13 @@ namespace RabbitMQ.Client.Impl
         {
             if (!_basicReturnWrapper.IsEmpty)
             {
-                var basicReturn = new BasicReturn(cmd.MethodBytes.Span);
+                var basicReturn = new BasicReturn(cmd.MethodBytes);
                 var e = new BasicReturnEventArgs
                 {
                     ReplyCode = basicReturn._replyCode,
                     ReplyText = basicReturn._replyText,
-                    Exchange = basicReturn._exchange,
-                    RoutingKey = basicReturn._routingKey,
+                    Exchange = basicReturn._exchange.Value,
+                    RoutingKey = basicReturn._routingKey.Value,
                     BasicProperties = (IBasicProperties)cmd.Header,
                     Body = cmd.Body
                 };
@@ -869,10 +865,10 @@ namespace RabbitMQ.Client.Impl
 
         protected void HandleQueueDeclareOk(in IncomingCommand cmd)
         {
-            var method = new Client.Framing.Impl.QueueDeclareOk(cmd.MethodBytes.Span);
+            var method = new Client.Framing.Impl.QueueDeclareOk(cmd.MethodBytes);
             cmd.ReturnMethodBuffer();
             var k = (QueueDeclareRpcContinuation)_continuationQueue.Next();
-            k.m_result = new QueueDeclareOk(method._queue, method._messageCount, method._consumerCount);
+            k.m_result = new QueueDeclareOk(method._queue.Value, method._messageCount, method._consumerCount);
             k.HandleCommand(IncomingCommand.Empty); // release the continuation.
         }
 

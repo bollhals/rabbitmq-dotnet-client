@@ -37,11 +37,11 @@ namespace RabbitMQ.Client.Framing.Impl
 {
     internal readonly struct BasicCancelOk : IAmqpMethod
     {
-        public readonly string _consumerTag;
+        public readonly CachedString _consumerTag;
 
-        public BasicCancelOk(ReadOnlySpan<byte> span)
+        public BasicCancelOk(ReadOnlyMemory<byte> memory)
         {
-            WireFormatting.ReadShortstr(span, out _consumerTag);
+            WireFormatting.ReadAndRemoveCachedShortstr(memory, out _consumerTag);
         }
 
         public ProtocolCommandId ProtocolCommandId => ProtocolCommandId.BasicCancelOk;

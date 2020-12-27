@@ -1,4 +1,7 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace RabbitMQ.Client
@@ -58,6 +61,66 @@ namespace RabbitMQ.Client
         {
             Value = value;
             Bytes = bytes;
+        }
+
+        /// <summary>
+        /// Gets or creates a <see cref="CachedString"/> from the cache.
+        /// </summary>
+        /// <param name="memory">The memory representation of the string.</param>
+        /// <returns>The <see cref="CachedString"/></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CachedString FromCache(ReadOnlyMemory<byte> memory)
+        {
+            return _cachedStringCache.GetOrAdd(memory, _cachedStringFactory);
+        }
+
+        /// <summary>
+        /// Gets and removes a <see cref="CachedString"/> from the cache.
+        /// </summary>
+        /// <param name="memory">The memory representation of the string.</param>
+        /// <returns>The <see cref="CachedString"/></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CachedString GetAndRemoveFromCache(ReadOnlyMemory<byte> memory)
+        {
+            return !_cachedStringCache.TryRemove(memory, out var value) ? value : new CachedString(memory);
+        }
+
+        /// <summary>
+        /// Gets a collection of all cached values.
+        /// </summary>
+        public ICollection<CachedString> CachedValues => _cachedStringCache.Values;
+
+        /// <summary>
+        /// Purges the full cache.
+        /// </summary>
+        public static void PurgeCache()
+        {
+            _cachedStringCache.Clear();
+        }
+
+        private static readonly ConcurrentDictionary<ReadOnlyMemory<byte>, CachedString> _cachedStringCache = new ConcurrentDictionary<ReadOnlyMemory<byte>, CachedString>(new Utf8BytesComparer());
+        private static readonly Func<ReadOnlyMemory<byte>, CachedString> _cachedStringFactory = key => new CachedString(key);
+
+        private sealed class Utf8BytesComparer : IEqualityComparer<ReadOnlyMemory<byte>>
+        {
+            public bool Equals(ReadOnlyMemory<byte> x, ReadOnlyMemory<byte> y)
+            {
+                return x.Span.SequenceEqual(y.Span);
+            }
+
+            public int GetHashCode(ReadOnlyMemory<byte> value)
+            {
+                var span = value.Span;
+                if ((uint)span.Length > 3u)
+                {
+                    return span.Length << 24 |
+                           span[0] << 16 |
+                           span[span.Length / 2] << 8 |
+                           span[span.Length - 1];
+                }
+
+                return span.Length;
+            }
         }
     }
 }

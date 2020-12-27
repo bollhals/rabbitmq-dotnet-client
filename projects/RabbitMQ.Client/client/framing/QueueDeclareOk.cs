@@ -37,13 +37,14 @@ namespace RabbitMQ.Client.Framing.Impl
 {
     internal readonly struct QueueDeclareOk : IAmqpMethod
     {
-        public readonly string _queue;
+        public readonly CachedString _queue;
         public readonly uint _messageCount;
         public readonly uint _consumerCount;
 
-        public QueueDeclareOk(ReadOnlySpan<byte> span)
+        public QueueDeclareOk(ReadOnlyMemory<byte> memory)
         {
-            int offset = WireFormatting.ReadShortstr(span, out _queue);
+            ReadOnlySpan<byte> span = memory.Span;
+            int offset = WireFormatting.ReadCachedShortstr(memory, out _queue);
             offset += WireFormatting.ReadLong(span.Slice(offset), out _messageCount);
             WireFormatting.ReadLong(span.Slice(offset), out _consumerCount);
         }
