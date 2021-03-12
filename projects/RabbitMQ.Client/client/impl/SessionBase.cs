@@ -32,9 +32,10 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-
+using RabbitMQ.Client.client.framing;
 using RabbitMQ.Client.Exceptions;
 using RabbitMQ.Client.Framing.Impl;
+using RabbitMQ.Client.Logging;
 
 namespace RabbitMQ.Client.Impl
 {
@@ -51,6 +52,7 @@ namespace RabbitMQ.Client.Impl
             {
                 connection.ConnectionShutdown += OnConnectionShutdown;
             }
+            RabbitMqClientEventSource.Log.ChannelOpened();
         }
 
         public event EventHandler<ShutdownEventArgs> SessionShutdown
@@ -103,7 +105,10 @@ namespace RabbitMQ.Client.Impl
 
         public void Close(ShutdownEventArgs reason, bool notify)
         {
-            Interlocked.CompareExchange(ref _closeReason, reason, null);
+            if (Interlocked.CompareExchange(ref _closeReason, reason, null) is null)
+            {
+                RabbitMqClientEventSource.Log.ChannelClosed();
+            }
             if (notify)
             {
                 OnSessionShutdown(CloseReason);
@@ -127,7 +132,7 @@ namespace RabbitMQ.Client.Impl
 
         public virtual void Transmit<T>(in T cmd) where T : struct, IOutgoingCommand
         {
-            if (!IsOpen && cmd.Method.ProtocolCommandId != client.framing.ProtocolCommandId.ChannelCloseOk)
+            if (!IsOpen && cmd.Method.ProtocolCommandId != ProtocolCommandId.ChannelCloseOk)
             {
                 throw new AlreadyClosedException(CloseReason);
             }

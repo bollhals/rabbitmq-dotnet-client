@@ -375,6 +375,7 @@ namespace RabbitMQ.Client.Framing.Impl
             _frameHandler.Close();
             _model0.SetCloseReason(CloseReason);
             _model0.FinishClose();
+            RabbitMqClientEventSource.Log.ConnectionClosed();
         }
 
         private void HandleMainLoopException(ShutdownEventArgs reason)
@@ -575,6 +576,7 @@ namespace RabbitMQ.Client.Framing.Impl
 
         private void Open()
         {
+            RabbitMqClientEventSource.Log.ConnectionOpened();
             StartAndTune();
             _model0.ConnectionOpen(_factory.VirtualHost);
         }
