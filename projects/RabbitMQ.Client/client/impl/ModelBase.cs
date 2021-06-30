@@ -53,10 +53,9 @@ namespace RabbitMQ.Client.Impl
         internal BlockingCell<ConnectionStartDetails> m_connectionStartCell;
         internal readonly IBasicProperties _emptyBasicProperties;
 
-        private readonly RpcContinuationQueue _continuationQueue = new RpcContinuationQueue();
+        private readonly BlockingRpcContinuation _rpcContinuation = new BlockingRpcContinuation();
         private readonly ManualResetEventSlim _flowControlBlock = new ManualResetEventSlim(true);
 
-        private readonly object _rpcLock = new object();
         private readonly object _confirmLock = new object();
         private readonly LinkedList<ulong> _pendingDeliveryTags = new LinkedList<ulong>();
 
@@ -111,6 +110,7 @@ namespace RabbitMQ.Client.Impl
             remove => _basicRecoverOkWrapper.RemoveHandler(value);
         }
         private EventingWrapper<EventArgs> _basicRecoverOkWrapper;
+        protected void RaiseRecoverOk() => _basicRecoverOkWrapper.Invoke(this, EventArgs.Empty);
 
         public event EventHandler<BasicReturnEventArgs> BasicReturn
         {
@@ -197,8 +197,9 @@ namespace RabbitMQ.Client.Impl
 
         private async Task CloseAsync(ShutdownEventArgs reason, bool abort)
         {
-            var k = new ShutdownContinuation();
-            ModelShutdown += k.OnConnectionShutdown;
+            using var resetEvent = new AutoResetEvent(false);
+            EventHandler<ShutdownEventArgs> handler = (sender, args) => resetEvent.Set();
+            ModelShutdown += handler;
 
             try
             {
@@ -208,7 +209,7 @@ namespace RabbitMQ.Client.Impl
                     _Private_ChannelClose(reason.ReplyCode, reason.ReplyText, 0, 0);
                 }
 
-                k.Wait(TimeSpan.FromMilliseconds(10000));
+                resetEvent.WaitOne(TimeSpan.FromMilliseconds(10000));
                 await ConsumerDispatcher.WaitForShutdownAsync().ConfigureAwait(false);
             }
             catch (AlreadyClosedException)
@@ -234,84 +235,23 @@ namespace RabbitMQ.Client.Impl
             }
             finally
             {
-                ModelShutdown -= k.OnConnectionShutdown;
+                ModelShutdown -= handler;
             }
         }
 
-        internal void ConnectionOpen(string virtualHost)
-        {
-            var k = new SimpleBlockingRpcContinuation();
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                try
-                {
-                    _Private_ConnectionOpen(virtualHost);
-                }
-                catch (AlreadyClosedException)
-                {
-                    // let continuation throw OperationInterruptedException,
-                    // which is a much more suitable exception before connection
-                    // negotiation finishes
-                }
-                k.GetReply(HandshakeContinuationTimeout);
-            }
-        }
+        internal abstract void ConnectionOpen(string virtualHost);
 
-        internal ConnectionSecureOrTune ConnectionSecureOk(byte[] response)
-        {
-            var k = new ConnectionStartRpcContinuation();
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                try
-                {
-                    _Private_ConnectionSecureOk(response);
-                }
-                catch (AlreadyClosedException)
-                {
-                    // let continuation throw OperationInterruptedException,
-                    // which is a much more suitable exception before connection
-                    // negotiation finishes
-                }
-                k.GetReply(HandshakeContinuationTimeout);
-            }
-            return k.m_result;
-        }
+        internal abstract ConnectionSecureOrTune ConnectionSecureOk(byte[] response);
 
-        internal ConnectionSecureOrTune ConnectionStartOk(IDictionary<string, object> clientProperties, string mechanism, byte[] response, string locale)
-        {
-            var k = new ConnectionStartRpcContinuation();
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                try
-                {
-                    _Private_ConnectionStartOk(clientProperties, mechanism,
-                        response, locale);
-                }
-                catch (AlreadyClosedException)
-                {
-                    // let continuation throw OperationInterruptedException,
-                    // which is a much more suitable exception before connection
-                    // negotiation finishes
-                }
-                k.GetReply(HandshakeContinuationTimeout);
-            }
-            return k.m_result;
-        }
+        internal abstract ConnectionSecureOrTune ConnectionStartOk(IDictionary<string, object> clientProperties, string mechanism, byte[] response, string locale);
 
         protected abstract bool DispatchAsynchronous(in IncomingCommand cmd);
 
-        protected void Enqueue(IRpcContinuation k)
+        private void EnsureNotClosed()
         {
-            if (IsOpen)
+            if (CloseReason != null)
             {
-                _continuationQueue.Enqueue(k);
-            }
-            else
-            {
-                k.HandleModelShutdown(CloseReason);
+                _rpcContinuation.HandleModelShutdown(CloseReason);
             }
         }
 
@@ -330,20 +270,20 @@ namespace RabbitMQ.Client.Impl
         {
             if (!DispatchAsynchronous(in cmd)) // Was asynchronous. Already processed. No need to process further.
             {
-                _continuationQueue.Next().HandleCommand(in cmd);
+                _rpcContinuation.HandleCommand(in cmd);
             }
         }
 
-        protected void ModelRpc<TMethod>(in TMethod method, ProtocolCommandId returnCommandId)
+        protected void ModelRpc<TMethod>(in TMethod method, ProtocolCommandId returnCommandId, TimeSpan timeout)
             where TMethod : struct, IOutgoingAmqpMethod
         {
-            var k = new SimpleBlockingRpcContinuation();
             IncomingCommand reply;
-            lock (_rpcLock)
+
+            lock (_rpcContinuation)
             {
-                Enqueue(k);
+                EnsureNotClosed();
                 Session.Transmit(method);
-                k.GetReply(ContinuationTimeout, out reply);
+                _rpcContinuation.GetReply(timeout, out reply);
             }
 
             reply.ReturnMethodBuffer();
@@ -354,17 +294,16 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        protected TReturn ModelRpc<TMethod, TReturn>(in TMethod method, ProtocolCommandId returnCommandId, Func<ReadOnlyMemory<byte>, TReturn> createFunc)
+        protected TReturn ModelRpc<TMethod, TReturn>(in TMethod method, ProtocolCommandId returnCommandId, Func<ReadOnlyMemory<byte>, TReturn> createFunc, TimeSpan timeout)
             where TMethod : struct, IOutgoingAmqpMethod
         {
-            var k = new SimpleBlockingRpcContinuation();
             IncomingCommand reply;
 
-            lock (_rpcLock)
+            lock (_rpcContinuation)
             {
-                Enqueue(k);
+                EnsureNotClosed();
                 Session.Transmit(method);
-                k.GetReply(ContinuationTimeout, out reply);
+                _rpcContinuation.GetReply(timeout, out reply);
             }
 
             if (reply.CommandId != returnCommandId)
@@ -376,6 +315,47 @@ namespace RabbitMQ.Client.Impl
             var returnValue = createFunc(reply.MethodBytes);
             reply.ReturnMethodBuffer();
             return returnValue;
+        }
+
+        protected object ModelRpc<TMethod>(in TMethod method, ProtocolCommandId returnCommandId, object state)
+            where TMethod : struct, IOutgoingAmqpMethod
+        {
+            IncomingCommand reply;
+
+            lock (_rpcContinuation)
+            {
+                EnsureNotClosed();
+                _rpcContinuation.State = state;
+                Session.Transmit(method);
+                _rpcContinuation.GetReply(ContinuationTimeout, out reply);
+                state = _rpcContinuation.State;
+            }
+
+            reply.ReturnMethodBuffer();
+
+            if (reply.CommandId != returnCommandId)
+            {
+                throw new UnexpectedMethodException(reply.CommandId, returnCommandId);
+            }
+
+            return state;
+        }
+
+        protected delegate T HandleIncomingCommandDelegate<out T>(in IncomingCommand cmd);
+
+        protected TReturn ModelRpc<TMethod, TReturn>(in TMethod method, HandleIncomingCommandDelegate<TReturn> createFunc)
+            where TMethod : struct, IOutgoingAmqpMethod
+        {
+            IncomingCommand reply;
+
+            lock (_rpcContinuation)
+            {
+                EnsureNotClosed();
+                Session.Transmit(method);
+                _rpcContinuation.GetReply(ContinuationTimeout, out reply);
+            }
+
+            return createFunc(reply);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -413,7 +393,7 @@ namespace RabbitMQ.Client.Impl
         ///</remarks>
         private void OnModelShutdown(ShutdownEventArgs reason)
         {
-            _continuationQueue.HandleModelShutdown(reason);
+            _rpcContinuation.HandleModelShutdown(reason);
             _modelShutdownWrapper.Invoke(this, reason);
             lock (_confirmLock)
             {
@@ -551,25 +531,14 @@ namespace RabbitMQ.Client.Impl
             ConsumerDispatcher.HandleBasicCancel(consumerTag);
         }
 
-        protected void HandleBasicCancelOk(in IncomingCommand cmd)
-        {
-            var k = (BasicConsumerRpcContinuation)_continuationQueue.Next();
-            var consumerTag = new Client.Framing.Impl.BasicCancelOk(cmd.MethodBytes.Span)._consumerTag;
-            cmd.ReturnMethodBuffer();
-            ConsumerDispatcher.HandleBasicCancelOk(consumerTag);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
         protected void HandleBasicConsumeOk(in IncomingCommand cmd)
         {
-            var consumerTag = new Client.Framing.Impl.BasicConsumeOk(cmd.MethodBytes.Span)._consumerTag;
+            // This has to be done at this point in time, otherwise new messages might get processed without the consumer known to the dispatcher.
+            var consumerTag = new BasicConsumeOk(cmd.MethodBytes.Span)._consumerTag;
+            ConsumerDispatcher.HandleBasicConsumeOk((IBasicConsumer)_rpcContinuation.State, consumerTag);
             cmd.ReturnMethodBuffer();
-            var k = (BasicConsumerRpcContinuation)_continuationQueue.Next();
-            k.m_consumerTag = consumerTag;
-            ConsumerDispatcher.HandleBasicConsumeOk(k.m_consumer, consumerTag);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
+            _rpcContinuation.HandleCommand(cmd, consumerTag); // release the continuation.
         }
-
         protected void HandleBasicDeliver(in IncomingCommand cmd)
         {
             var method = new Client.Framing.Impl.BasicDeliver(cmd.MethodBytes.Span);
@@ -586,40 +555,9 @@ namespace RabbitMQ.Client.Impl
                     cmd.TakeoverPayload());
         }
 
-        protected void HandleBasicGetOk(in IncomingCommand cmd)
-        {
-            var method = new BasicGetOk(cmd.MethodBytes.Span);
-            cmd.ReturnMethodBuffer();
-            var k = (BasicGetRpcContinuation)_continuationQueue.Next();
-            k.m_result = new BasicGetResult(
-                AdjustDeliveryTag(method._deliveryTag),
-                method._redelivered,
-                method._exchange,
-                method._routingKey,
-                method._messageCount,
-                (IBasicProperties)cmd.Header,
-                cmd.Body,
-                cmd.TakeoverPayload());
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
         protected virtual ulong AdjustDeliveryTag(ulong deliveryTag)
         {
             return deliveryTag;
-        }
-
-        protected void HandleBasicGetEmpty()
-        {
-            var k = (BasicGetRpcContinuation)_continuationQueue.Next();
-            k.m_result = null;
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
-        protected void HandleBasicRecoverOk()
-        {
-            var k = (SimpleBlockingRpcContinuation)_continuationQueue.Next();
-            _basicRecoverOkWrapper.Invoke(this, EventArgs.Empty);
-            k.HandleCommand(IncomingCommand.Empty);
         }
 
         protected void HandleBasicReturn(in IncomingCommand cmd)
@@ -719,18 +657,6 @@ namespace RabbitMQ.Client.Impl
             }
         }
 
-        protected void HandleConnectionSecure(in IncomingCommand cmd)
-        {
-            var challenge = new ConnectionSecure(cmd.MethodBytes.Span)._challenge;
-            cmd.ReturnMethodBuffer();
-            var k = (ConnectionStartRpcContinuation)_continuationQueue.Next();
-            k.m_result = new ConnectionSecureOrTune
-            {
-                m_challenge = challenge
-            };
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
         protected void HandleConnectionStart(in IncomingCommand cmd)
         {
             if (m_connectionStartCell is null)
@@ -753,48 +679,14 @@ namespace RabbitMQ.Client.Impl
             m_connectionStartCell = null;
         }
 
-        protected void HandleConnectionTune(in IncomingCommand cmd)
-        {
-            var connectionTune = new ConnectionTune(cmd.MethodBytes.Span);
-            cmd.ReturnMethodBuffer();
-            var k = (ConnectionStartRpcContinuation)_continuationQueue.Next();
-            k.m_result = new ConnectionSecureOrTune
-            {
-                m_tuneDetails =
-                {
-                    m_channelMax = connectionTune._channelMax,
-                    m_frameMax = connectionTune._frameMax,
-                    m_heartbeatInSeconds = connectionTune._heartbeat
-                }
-            };
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
         protected void HandleConnectionUnblocked()
         {
             Session.Connection.HandleConnectionUnblocked();
         }
 
-        protected void HandleQueueDeclareOk(in IncomingCommand cmd)
-        {
-            var method = new Client.Framing.Impl.QueueDeclareOk(cmd.MethodBytes.Span);
-            cmd.ReturnMethodBuffer();
-            var k = (QueueDeclareRpcContinuation)_continuationQueue.Next();
-            k.m_result = new QueueDeclareOk(method._queue, method._messageCount, method._consumerCount);
-            k.HandleCommand(IncomingCommand.Empty); // release the continuation.
-        }
-
-        public abstract void _Private_BasicCancel(string consumerTag, bool nowait);
-
-        public abstract void _Private_BasicConsume(string queue, string consumerTag, bool noLocal, bool autoAck, bool exclusive, bool nowait, IDictionary<string, object> arguments);
-
-        public abstract void _Private_BasicGet(string queue, bool autoAck);
-
         public abstract void _Private_BasicPublish(string exchange, string routingKey, bool mandatory, IBasicProperties basicProperties, ReadOnlyMemory<byte> body);
 
         public abstract void _Private_BasicPublishMemory(ReadOnlyMemory<byte> exchange, ReadOnlyMemory<byte> routingKey, bool mandatory, IBasicProperties basicProperties, ReadOnlyMemory<byte> body);
-
-        public abstract void _Private_BasicRecover(bool requeue);
 
         public abstract void _Private_ChannelClose(ushort replyCode, string replyText, ushort classId, ushort methodId);
 
@@ -808,12 +700,6 @@ namespace RabbitMQ.Client.Impl
 
         public abstract void _Private_ConnectionCloseOk();
 
-        public abstract void _Private_ConnectionOpen(string virtualHost);
-
-        public abstract void _Private_ConnectionSecureOk(byte[] response);
-
-        public abstract void _Private_ConnectionStartOk(IDictionary<string, object> clientProperties, string mechanism, byte[] response, string locale);
-
         public abstract void _Private_UpdateSecret(byte[] @newSecret, string @reason);
 
         public abstract void _Private_ExchangeBind(string destination, string source, string routingKey, bool nowait, IDictionary<string, object> arguments);
@@ -826,72 +712,20 @@ namespace RabbitMQ.Client.Impl
 
         public abstract void _Private_QueueBind(string queue, string exchange, string routingKey, bool nowait, IDictionary<string, object> arguments);
 
-        public abstract void _Private_QueueDeclare(string queue, bool passive, bool durable, bool exclusive, bool autoDelete, bool nowait, IDictionary<string, object> arguments);
-
         public abstract uint _Private_QueueDelete(string queue, bool ifUnused, bool ifEmpty, bool nowait);
 
         public abstract uint _Private_QueuePurge(string queue, bool nowait);
 
         public abstract void BasicAck(ulong deliveryTag, bool multiple);
 
-        public void BasicCancel(string consumerTag)
-        {
-            var k = new BasicConsumerRpcContinuation { m_consumerTag = consumerTag };
+        public abstract void BasicCancel(string consumerTag);
 
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                _Private_BasicCancel(consumerTag, false);
-                k.GetReply(ContinuationTimeout);
-            }
-        }
+        public abstract void BasicCancelNoWait(string consumerTag);
 
-        public void BasicCancelNoWait(string consumerTag)
-        {
-            _Private_BasicCancel(consumerTag, true);
-            ConsumerDispatcher.GetAndRemoveConsumer(consumerTag);
-        }
+        public abstract string BasicConsume(string queue, bool autoAck, string consumerTag, bool noLocal,
+            bool exclusive, IDictionary<string, object> arguments, IBasicConsumer consumer);
 
-        public string BasicConsume(string queue, bool autoAck, string consumerTag, bool noLocal, bool exclusive, IDictionary<string, object> arguments, IBasicConsumer consumer)
-        {
-            // TODO: Replace with flag
-            if (ConsumerDispatcher is AsyncConsumerDispatcher)
-            {
-                if (!(consumer is IAsyncBasicConsumer))
-                {
-                    // TODO: Friendly message
-                    throw new InvalidOperationException("In the async mode you have to use an async consumer");
-                }
-            }
-
-            var k = new BasicConsumerRpcContinuation { m_consumer = consumer };
-
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                // Non-nowait. We have an unconventional means of getting
-                // the RPC response, but a response is still expected.
-                _Private_BasicConsume(queue, consumerTag, noLocal, autoAck, exclusive,
-                    /*nowait:*/ false, arguments);
-                k.GetReply(ContinuationTimeout);
-            }
-            string actualConsumerTag = k.m_consumerTag;
-
-            return actualConsumerTag;
-        }
-
-        public BasicGetResult BasicGet(string queue, bool autoAck)
-        {
-            var k = new BasicGetRpcContinuation();
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                _Private_BasicGet(queue, autoAck);
-                k.GetReply(ContinuationTimeout);
-            }
-
-            return k.m_result;
-        }
+        public abstract BasicGetResult BasicGet(string queue, bool autoAck);
 
         public abstract void BasicNack(ulong deliveryTag, bool multiple, bool requeue);
 
@@ -947,17 +781,7 @@ namespace RabbitMQ.Client.Impl
 
         public abstract void BasicQos(uint prefetchSize, ushort prefetchCount, bool global);
 
-        public void BasicRecover(bool requeue)
-        {
-            var k = new SimpleBlockingRpcContinuation();
-
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                _Private_BasicRecover(requeue);
-                k.GetReply(ContinuationTimeout);
-            }
-        }
+        public abstract void BasicRecover(bool requeue);
 
         public abstract void BasicRecoverAsync(bool requeue);
 
@@ -1031,14 +855,18 @@ namespace RabbitMQ.Client.Impl
             _Private_QueueBind(queue, exchange, routingKey, true, arguments);
         }
 
+        protected abstract QueueDeclareOk QueueDeclare(string queue, bool passive, bool durable, bool exclusive, bool autoDelete, IDictionary<string, object> arguments);
+
         public QueueDeclareOk QueueDeclare(string queue, bool durable, bool exclusive, bool autoDelete, IDictionary<string, object> arguments)
         {
             return QueueDeclare(queue, false, durable, exclusive, autoDelete, arguments);
         }
 
+        protected abstract void QueueDeclareNoWait(string queue, bool passive, bool durable, bool exclusive, bool autoDelete, IDictionary<string, object> arguments);
+
         public void QueueDeclareNoWait(string queue, bool durable, bool exclusive, bool autoDelete, IDictionary<string, object> arguments)
         {
-            _Private_QueueDeclare(queue, false, durable, exclusive, autoDelete, true, arguments);
+            QueueDeclareNoWait(queue, false, durable, exclusive, autoDelete, arguments);
         }
 
         public QueueDeclareOk QueueDeclarePassive(string queue)
@@ -1162,40 +990,6 @@ namespace RabbitMQ.Client.Impl
                         exception),
                     false).ConfigureAwait(false);
             }
-        }
-
-        private QueueDeclareOk QueueDeclare(string queue, bool passive, bool durable, bool exclusive, bool autoDelete, IDictionary<string, object> arguments)
-        {
-            var k = new QueueDeclareRpcContinuation();
-            lock (_rpcLock)
-            {
-                Enqueue(k);
-                _Private_QueueDeclare(queue, passive, durable, exclusive, autoDelete, false, arguments);
-                k.GetReply(ContinuationTimeout);
-            }
-            return k.m_result;
-        }
-
-
-        public class BasicConsumerRpcContinuation : SimpleBlockingRpcContinuation
-        {
-            public IBasicConsumer m_consumer;
-            public string m_consumerTag;
-        }
-
-        public class BasicGetRpcContinuation : SimpleBlockingRpcContinuation
-        {
-            public BasicGetResult m_result;
-        }
-
-        public class ConnectionStartRpcContinuation : SimpleBlockingRpcContinuation
-        {
-            public ConnectionSecureOrTune m_result;
-        }
-
-        public class QueueDeclareRpcContinuation : SimpleBlockingRpcContinuation
-        {
-            public QueueDeclareOk m_result;
         }
     }
 }

@@ -30,43 +30,46 @@
 //---------------------------------------------------------------------------
 
 using System;
-
-using RabbitMQ.Util;
+using System.Threading;
+using RabbitMQ.Client.Exceptions;
 
 namespace RabbitMQ.Client.Impl
 {
-    internal class ShutdownContinuation
+    internal sealed class BlockingRpcContinuation
     {
-        public readonly BlockingCell<ShutdownEventArgs> m_cell = new BlockingCell<ShutdownEventArgs>();
+        private readonly AutoResetEvent _autoResetEvent = new AutoResetEvent(false);
+        private IncomingCommand _incomingCommand;
+        private ShutdownEventArgs _shutdownEventArgs;
 
-        // You will note there are two practically identical overloads
-        // of OnShutdown() here. This is because Microsoft's C#
-        // compilers do not consistently support the Liskov
-        // substitutability principle. When I use
-        // OnShutdown(object,ShutdownEventArgs), the compilers
-        // complain that OnShutdown can't be placed into a
-        // ConnectionShutdownEventHandler because object doesn't
-        // "match" IConnection, even though there's no context in
-        // which the program could Go Wrong were it to accept the
-        // code. The same problem appears for
-        // ModelShutdownEventHandler. The .NET 1.1 compiler complains
-        // about these two cases, and the .NET 2.0 compiler does not -
-        // presumably they improved the type checker with the new
-        // release of the compiler.
+        public object State { get; set; }
 
-        public virtual void OnConnectionShutdown(object sender, ShutdownEventArgs reason)
+        public void GetReply(TimeSpan timeout, out IncomingCommand reply)
         {
-            m_cell.ContinueWithValue(reason);
+            if (_autoResetEvent.WaitOne(timeout))
+            {
+                if (_shutdownEventArgs is null)
+                {
+                    reply = _incomingCommand;
+                    return;
+                }
+                // shut down
+                throw new OperationInterruptedException(_shutdownEventArgs);
+            }
+            // timeout
+            throw new TimeoutException();
         }
 
-        public virtual ShutdownEventArgs Wait()
+        public void HandleCommand(in IncomingCommand cmd, object state = null)
         {
-            return m_cell.WaitForValue();
+            State = state;
+            _incomingCommand = cmd;
+            _autoResetEvent.Set();
         }
 
-        public ShutdownEventArgs Wait(TimeSpan timeout)
+        public void HandleModelShutdown(ShutdownEventArgs reason)
         {
-            return m_cell.WaitForValue(timeout);
+            _shutdownEventArgs = reason;
+            HandleCommand(IncomingCommand.Empty);
         }
     }
 }
